@@ -1,0 +1,2803 @@
+---
+title: "RMD SDSS"
+author: "Acadia Berry"
+date: "2024-03-11"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+set.seed(123)
+```
+
+# load packages
+
+```{r load packages}
+library(ggplot2)
+library(psych)
+library(dplyr)
+library(caret)
+library(tidyverse)
+library(psych)
+library(car)
+library(plyr)
+library(rpart)
+library(pROC)
+library(broom)
+library(caret)
+library(rattle)
+library(smotefamily)
+library(ResourceSelection)
+library(comorbidity)
+library(xgboost)
+library(shapr)
+library(rpart.plot)
+library(randomForest)
+library(glmnet)
+library(fastDummies)
+library(MASS)
+
+# Define a custom color palette
+custom_colors <- c("#0072B2", "#009E73", "#F55E00", "#CC79A7", "#F0E442", "#E69F00", "#F5B4E9", "#A5B4E9","#15BE37","#241571", "#FFC300", "#DAF7A6")
+
+# Set a global theme for ggplot2 
+custom_theme <- theme_minimal() +
+  theme(
+    text = element_text(size = 12),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10),
+    panel.background = element_rect(fill = "white"), 
+    plot.background = element_rect(fill = "white"),   
+    panel.grid.major = element_line(color = "gray"), 
+    panel.grid.minor = element_line(color = "lightgray")  
+  
+  )
+
+# Set the global theme
+theme_set(custom_theme)
+
+```
+
+# LR Modeling
+
+## Verifying model assumptions
+
+Verifying model assumptions requires test and training sets for
+validation.
+
+-   Subset the training and test data sets to include only the required
+    columns needed for modeling.
+
+-   Fit a logistic regression model (my_logit_model) to the training
+    data using the glm function with the binomial family.
+
+-   Print the summary statistics of the logistic regression model to
+    examine the coefficients, standard errors, z-values, and p-values.
+
+-   Generate predictions (testsetpreds.LR) on the test data using the
+    logistic regression model.
+
+-   Convert the predicted probabilities to binary predictions
+    (predicted_binary) based on a threshold of 0.5.
+
+-   Check the frequency distribution of the predicted values using the
+    table function.
+
+-   Convert the data_test\$readmitted_2 variable to a factor with levels
+    "0" and "1" for comparison.
+
+-   Calculate the confusion matrix (cm1) to assess the performance of
+    the model.
+
+-   Conduct the Hosmer-Lemeshow test (hoslem_test) to evaluate the
+    goodness of fit of the logistic regression model.
+
+```{r}
+# Subset DataFrame to include only required columns
+data <- train_set_balanced2[, c(
+                       "race", "gender", 
+                       "admission_type_id" , 
+                       "admission_source_id" ,
+                       #"age",
+                       "log_num_lab",
+                      
+                       "log_num_med" ,   
+                       "preceding_visits_binary",
+                       #"insulin",
+                       "change",
+                       "diabetesMed" ,  
+                       "A1Cresult", 
+                        
+                       "log_time_hosp",
+                       "readmitted_2", 
+                       "log_scores")]
+
+data_test <- test_set2[, c(
+                       "race", "gender", 
+                       "admission_type_id" , 
+                       "admission_source_id" ,
+                      # "age",
+                       
+                       "log_num_lab",
+                       "log_num_med" ,   
+                       "preceding_visits_binary",
+                       #"insulin",
+                       "change",
+                       "diabetesMed" ,  
+                       "A1Cresult", 
+                        
+                       "log_time_hosp",
+                       "readmitted_2", 
+                       "log_scores")]
+
+
+# Fit logistic regression model
+my_logit_model <- glm(readmitted_2 ~ ., data = data, family = binomial) 
+
+summary(my_logit_model)
+
+
+# predictions
+testsetpreds.LR <- predict(my_logit_model, data_test, type= "response")
+head(testsetpreds.LR)
+
+# Convert predictions to binary based on threshold (0.5 in this case)
+predicted_binary <- ifelse(testsetpreds.LR > 0.5, "1", "0")
+
+# check results
+table(predicted_binary)
+
+# convert to factor
+predicted_binary<- as.factor(predicted_binary)
+
+
+# Convert data_test$readmitted_2 to factor with levels "0" and "1"
+data_test$readmitted_2 <- factor(data_test$readmitted_2, levels = c("0", "1"))
+table(data_test$readmitted_2 )
+
+# Calculate confusion matrix
+cm1 <- confusionMatrix(predicted_binary, reference = data_test$readmitted_2, positive = "1")
+print(cm1)
+
+
+```
+
+## LASSO
+
+-   Separated predictors (X) and the outcome variable (y) from the
+    training dataset (data).
+
+-   Extracted predictors (X_test) and the outcome variable (y_test) from
+    the test dataset (data_test).
+
+-   Converted categorical predictors into dummy variables using the
+    fastDummies package, which creates binary indicators for each
+    category.
+
+-   Removed the original categorical variables from X and X_test after
+    creating dummy variables.
+
+-   Fitted a LASSO logistic regression model (lasso_model) using
+    cross-validation (cv.glmnet function) with a binomial family and an
+    alpha value of 1 (indicating LASSO regularization).
+
+-   Visualized the cross-validated mean squared error as a function of
+    lambda (the tuning parameter for regularization).
+
+-   Determined the optimal lambda value (optimal_lambda) based on
+    cross-validation.
+
+-   Extracted the coefficients of the selected variables from the LASSO
+    model at the optimal lambda value.
+
+-   Made predictions (predicted_values) on the test dataset using the
+    LASSO model with the optimal lambda value.
+
+-   Converted predicted probabilities to class predictions (0 or 1)
+    based on a threshold of 0.5.
+
+-   Constructed confusion matrix to evaluate the performance of the
+    LASSO model
+
+```{r}
+
+# predictors
+X <- subset(data, select = -readmitted_2)
+# outcome
+y <- data$readmitted_2
+
+# Create dummy variables for categorical predictors
+X <- fastDummies::dummy_cols(X, remove_first_dummy = TRUE)
+
+# For testing data
+X_test <- subset(data_test, select = -readmitted_2)
+y_test <- data_test$readmitted_2
+
+# Create dummy variables for categorical predictors
+X_test <- fastDummies::dummy_cols(X_test, remove_first_dummy = TRUE)
+
+# Remove original categorical variables from X and X_test
+original_categorical <- sapply(X, is.factor)
+X <- X[, !original_categorical]
+original_categorical <- sapply(X_test, is.factor)
+X_test <- X_test[, !original_categorical]
+
+# Fit LASSO logistic regression model
+lasso_model <- cv.glmnet(as.matrix(X), y, family = "binomial", alpha = 1)
+
+# Plot the cross-validated mean squared error (CV MSE) as a function of lambda
+plot(lasso_model)
+
+# Extract the optimal lambda value
+optimal_lambda <- lasso_model$lambda.min
+print(paste("Optimal lambda:", optimal_lambda))
+
+# Get coefficients of the selected variables
+lasso_coefficients <- coef(lasso_model, s = optimal_lambda)
+print(lasso_coefficients)
+
+# used to visualize the cross-validated deviance (or loss) as a function of the log of lambd
+
+
+# Predict using the LASSO model
+predicted_values <- predict(lasso_model, newx = as.matrix(X_test), s = optimal_lambda, type = "response")
+
+# Convert predicted probabilities to class predictions (0 or 1)
+predicted_classes <- ifelse(predicted_values > 0.5, 1, 0)
+
+# Create the confusion matrix
+confusion_matrix <- table(Actual = y_test, Predicted = predicted_classes)
+print(confusion_matrix)
+
+# Assign values
+TP <- 621
+TN <- 4762
+FP <- 2795
+FN <- 523
+
+# Calculate accuracy
+accuracy <- (TP + TN) / (TP + TN + FP + FN)
+
+# Calculate sensitivity
+sensitivity <- TP / (TP + FN)
+
+# Print results
+print(paste("Accuracy:", round(accuracy, 3)))
+print(paste("Sensitivity:", round(sensitivity, 3)))
+
+
+# Calculate ROC curve
+roc_curve <- roc(y_test, predicted_values)
+plot(roc_curve, main = "ROC Curve for LASSO Model", col = "blue", lwd = 2)
+abline(a = 0, b = 1, col = "red", lty = 2)
+auc_value <- auc(roc_curve)
+print(paste("AUC:", round(auc_value, 3)))
+
+
+
+```
+
+## multicollinearity
+
+-   Checked for multicollinearity using the Variance Inflation Factor
+    (VIF)
+-   Obtained VIF results using the car::vif function
+-   No significant multicollinearity was detected
+
+```{r}
+#  Check for multicollinearity
+vif_results <- car::vif(my_logit_model)
+print(vif_results)
+
+```
+
+## linearity assumption
+
+-   Assessed the linearity assumption between predictor and the logit of
+    the outcome
+-   Utilized component-residual plots for assessment
+-   Examined the relationship between (predictor) l and the logit of
+    readmission
+-   Calculated probabilities based on quartiles of (predictor)
+-   Derived logits from the calculated probabilities
+-   Plotted (predictor) against log odds of readmission
+-   Observed the relationship between (predictor) and log odds of
+    readmission
+
+assessing linearity between time in hospital and logit of readmission
+
+```{r}
+dfC$readmitted_2<- as.factor(dfC$readmitted_2)
+summary(dfC$time_in_hospital)
+
+# check first quartile- 2 and days and less
+table(dfC$readmitted_2[dfC$time_in_hospital<2])
+
+
+# its <4 because as an integer, it wouldnt capture anything if it was >2 and <3
+
+p1 <- mean(dfC$time_in_hospital<2)
+p2 <- mean(dfC$time_in_hospital >= 2 & dfC$time_in_hospital <3)
+
+
+p3 <- mean(dfC$time_in_hospital >= 3 & dfC$time_in_hospital <6)
+
+p4 <- mean(dfC$time_in_hospital >= 6)
+
+
+probs <- c(p1, p2, p3, p4)
+probs
+
+
+logits<- log(probs/(1-probs))
+
+q <- quantile(dfC$time_in_hospital, probs= seq(0,1,0.25))
+q
+
+# Compute medians for different quantile ranges
+meds <- c(
+  median(dfC$time_in_hospital[dfC$time_in_hospital < q[2]]), 
+  median(dfC$time_in_hospital[dfC$time_in_hospital >= q[2] & dfC$time_in_hospital < q[3]]), 
+  median(dfC$time_in_hospital[dfC$time_in_hospital >= q[3] & dfC$time_in_hospital < q[4]]),
+  median(dfC$time_in_hospital[dfC$time_in_hospital > q[4]]))
+
+
+
+plot(meds, logits, main= "Time in hospital against log odds of readmitted", ylab= "log odds", cex = 1.5, col = "#009E73", pch= 19)
+lines(meds, logits, col = "#A5B4E9", lwd = 1)
+
+
+
+```
+
+Assessing linearity between log of time in hospital and logit of
+readmission. relationship appear more linear.
+
+```{r}
+
+dfC$readmitted_2<- as.factor(dfC$readmitted_2)
+summary(dfC$log_time_hosp)
+
+# check first quartile- 2 and days and less
+table(dfC$readmitted_2[dfC$log_time_hosp<1.0986])
+
+
+p1 <- mean(dfC$time_in_hospital<1.0986)
+p2 <- mean(dfC$log_time_hosp >= 1.0986 & dfC$log_time_hosp <1.3863)
+
+
+p3 <- mean(dfC$log_time_hosp >= 1.3863 & dfC$log_time_hosp <1.9459)
+
+p4 <- mean(dfC$log_time_hosp >= 1.9459)
+
+
+probs <- c(p1, p2, p3, p4)
+probs
+
+
+logits<- log(probs/(1-probs))
+
+q <- quantile(dfC$log_time_hosp, probs= seq(0,1,0.25))
+q
+
+# Compute medians for different quantile ranges
+meds <- c(
+  median(dfC$log_time_hosp[dfC$log_time_hosp < q[2]]), 
+  median(dfC$log_time_hosp[dfC$log_time_hosp >= q[2] & dfC$log_time_hosp < q[3]]), 
+  median(dfC$log_time_hosp[dfC$log_time_hosp >= q[3] & dfC$log_time_hosp < q[4]]),
+  median(dfC$log_time_hosp[dfC$log_time_hosp > q[4]]))
+
+
+
+plot(meds, logits, main= "Log of time in hospital against log odds of readmitted", ylab= "log odds", cex = 1.5, col = "#009E73", pch= 19)
+lines(meds, logits, col = "#A5B4E9", lwd = 1)
+
+
+```
+
+Assessing linearity between number of lab procedures and logit of
+readmission
+
+```{r}
+
+dfC$readmitted_2<- as.factor(dfC$readmitted_2)
+summary(dfC$num_lab_procedures)
+
+# check first quartile- 2 and days and less
+table(dfC$readmitted_2[dfC$num_lab_procedures<31.0 ])
+
+
+p1 <- mean(dfC$num_lab_procedures<31.0)
+
+p2 <- mean(dfC$num_lab_procedures >= 31.0  & dfC$num_lab_procedures <44.0)
+
+
+p3 <- mean(dfC$num_lab_procedures >= 44.0 & dfC$num_lab_procedures <57.0 )
+
+p4 <- mean(dfC$num_lab_procedures >= 57.0 )
+
+
+probs <- c(p1, p2, p3, p4)
+probs
+
+
+logits<- log(probs/(1-probs))
+
+q <- quantile(dfC$num_lab_procedures, probs= seq(0,1,0.25))
+q
+
+# Compute medians for different quantile ranges
+meds <- c(
+  median(dfC$num_lab_procedures[dfC$num_lab_procedures < q[2]]), 
+  median(dfC$num_lab_procedures[dfC$num_lab_procedures >= q[2] & dfC$num_lab_procedures < q[3]]), 
+  median(dfC$num_lab_procedures[dfC$num_lab_procedures >= q[3] & dfC$num_lab_procedures < q[4]]),
+  median(dfC$num_lab_procedures[dfC$num_lab_procedures > q[4]]))
+
+
+plot(meds, logits, main= "Number of lab procedures against log odds of readmitted", ylab= "log odds", cex = 1.5, col = "#009E73", pch= 19)
+lines(meds, logits, col = "#A5B4E9", lwd = 1)
+
+
+```
+
+Assessing linearity between number of log of lab procedures and logit of
+readmission. appears more linear with log transformation
+
+```{r}
+
+dfC$readmitted_2<- as.factor(dfC$readmitted_2)
+summary(dfC$log_num_lab)
+
+# check first quartile- 2 and days and less
+table(dfC$readmitted_2[dfC$num_lab_procedures<31.0 ])
+
+
+p1 <- mean(dfC$num_lab_procedures<3.4657)
+
+p2 <- mean(dfC$num_lab_procedures >= 3.4657  & dfC$num_lab_procedures <3.8067)
+
+
+p3 <- mean(dfC$num_lab_procedures >= 3.8067 & dfC$num_lab_procedures < 4.0604)
+
+p4 <- mean(dfC$num_lab_procedures >= 4.0604 )
+
+
+probs <- c(p1, p2, p3, p4)
+probs
+
+
+logits<- log(probs/(1-probs))
+
+q <- quantile(dfC$num_lab_procedures, probs= seq(0,1,0.25))
+q
+
+# Compute medians for different quantile ranges
+meds <- c(
+  median(dfC$num_lab_procedures[dfC$num_lab_procedures < q[2]]), 
+  median(dfC$num_lab_procedures[dfC$num_lab_procedures >= q[2] & dfC$num_lab_procedures < q[3]]), 
+  median(dfC$num_lab_procedures[dfC$num_lab_procedures >= q[3] & dfC$num_lab_procedures < q[4]]),
+  median(dfC$num_lab_procedures[dfC$num_lab_procedures > q[4]]))
+
+
+plot(meds, logits, main= "Log of number of lab procedures against log odds of readmitted", ylab= "log odds", cex = 1.5, col = "#009E73", pch= 19)
+lines(meds, logits, col = "#A5B4E9", lwd = 1)
+
+
+
+```
+
+Assessing linearity between number of medications and logit of
+readmission.
+
+```{r}
+
+var<- dfC$num_medications
+
+dfC$readmitted_2<- as.factor(dfC$readmitted_2)
+summary(dfC$num_medications)
+
+# check first quartile- 2 and days and less
+table(dfC$readmitted_2[var<10 ])
+
+
+p1 <- mean(var <10)
+p2 <- mean(var >= 10  & var <14)
+
+
+p3 <- mean(var >= 14 & var <20)
+
+p4 <- mean(var >= 20 )
+
+
+probs <- c(p1, p2, p3, p4)
+probs
+
+
+logits<- log(probs/(1-probs))
+
+q <- quantile(var, probs= seq(0,1,0.25))
+q
+
+# Compute medians for different quantile ranges
+meds <- c(
+  median(var[var < q[2]]), 
+  median(var[var >= q[2] & var < q[3]]), 
+  median(var[var >= q[3] & var< q[4]]),
+  median(var[var > q[4]]))
+
+
+plot(meds, logits, main= "Number of medications against log odds of readmitted", ylab= "log odds", cex = 1.5, col = "#009E73", pch= 19)
+lines(meds, logits, col = "#A5B4E9", lwd = 1)
+
+```
+
+Assessing linearity between number of procedures and logit of
+readmission
+
+```{r}
+
+var<- dfC$num_procedures
+
+dfC$readmitted_2<- as.factor(dfC$readmitted_2)
+summary(dfC$num_procedures)
+
+# check first quartile- 2 and days and less
+table(dfC$readmitted_2[var<1])
+
+p1 <- mean(var <1)
+p2 <- mean(var >=1 & var <2)
+
+p3 <- mean(var >= 1 & var <2)
+
+p4 <- mean(var >= 2 )
+
+
+probs <- c(p1, p2, p3, p4)
+probs
+
+
+logits<- log(probs/(1-probs))
+
+q <- quantile(var, probs= seq(0,1,0.25))
+q
+
+# Compute medians for different quantile ranges
+meds <- c(
+  median(var[var < q[2]]), 
+  median(var[var >= q[2] & var < q[3]]), 
+  median(var[var >= q[3] & var< q[4]]),
+  median(var[var > q[4]]))
+
+
+plot(meds, logits, main= "Number of procedures against log odds of readmitted", ylab= "log odds", cex = 1.5, col = "#009E73", pch= 19)
+lines(meds, logits, col = "#A5B4E9", lwd = 1)
+
+```
+
+Variables *number_outpatient, number_inpatient and number_emergency* are
+too imbalanced to assess linearity because 1st - 3rd quartiles are all
+0. Only one point shows on the plot. It is not possible to assess the
+linearity to the logit for these variables in this way. Test on
+*preceding_visits* instead.
+
+```{r}
+
+var<- dfC$preceding_visits
+
+dfC$readmitted_2<- as.factor(dfC$readmitted_2)
+summary(dfC$preceding_visits)
+
+# check first quartile- 2 and days and less
+table(dfC$readmitted_2[var<0])
+
+p1 <- mean(var <0)
+p2 <- mean(var >=0 & var <0)
+
+p3 <- mean(var >= 0 & var <0.2312)
+
+p4 <- mean(var >= 1)
+
+
+probs <- c(p1, p2, p3, p4)
+probs
+
+
+logits<- log(probs/(1-probs))
+
+q <- quantile(var, probs= seq(0,1,0.25))
+q
+
+# Compute medians for different quantile ranges
+meds <- c(
+  median(var[var < q[2]]), 
+  median(var[var >= q[2] & var < q[3]]), 
+  median(var[var >= q[3] & var< q[4]]),
+  median(var[var > q[4]]))
+
+
+plot(meds, logits, main= "should be linear if tih is linear related to log odds of readmitted_2", ylab= "log odds")
+
+```
+
+# LR data sets
+
+## SMOTE
+
+SMOTE
+
+Created a SMOTE resampled dataset to address class imbalance of
+readmitted.
+
+-   Applied SMOTE to generate synthetic records with various values of
+    dup_size, where 0 = 1:1 ratio.
+
+-   Built a logistic regression model (smote_LR) using the
+    SMOTE-generated data.
+
+-   -Evaluated the model's performance on the test set (dummy_te2) using
+    confusion matrix analysis. \`
+
+-   Aside from 0, dup_size of 6 allows the best balance possible, with
+    the positive records being slightly larger number than the number of
+    negative records.
+
+```{r}
+
+set.seed(123)
+# Subset DataFrame to include only required columns
+dummy_set <- train_set2[, c("readmitted_2",
+                            "age",
+                            "race", 
+                            "gender", 
+                            "admission_type_id" ,
+                            "admission_source_id" ,
+                            "num_medications" ,
+                            "change", 
+                            "diabetesMed" ,  
+                            "A1Cresult",
+                            "discharge",
+                            "log_time_hosp", 
+                             "log_num_lab",
+                         
+                            "preceding_visits_binary",
+                            "log_scores" 
+                              )]
+
+# Identify factor variables
+factor_variables <- sapply(dummy_set, is.factor)
+
+# Use dummy_columns function
+dummy2 <- dummy_columns(
+  dummy_set,
+  select_columns = NULL,
+  remove_first_dummy = TRUE, 
+  remove_most_frequent_dummy = FALSE,
+  ignore_na = FALSE,
+  split = NULL,
+  remove_selected_columns = TRUE,
+  
+)
+
+# Subset DataFrame to include only required columns
+dummy_set_te <- test_set2[, c("readmitted_2",
+                            "age",
+                            "race", 
+                            "gender", 
+                            "admission_type_id" ,
+                            "admission_source_id" ,
+                            "num_medications" ,
+                            "change", 
+                            "diabetesMed" ,  
+                            "A1Cresult",
+                           "discharge",
+                            "log_time_hosp", 
+                          
+                           "log_num_lab",
+                            "preceding_visits_binary",
+                            "log_scores"
+                              )]
+
+# Identify factor variables
+factor_variables <- sapply(dummy_set_te, is.factor)
+
+# Use dummy_columns function
+dummy_te2 <- dummy_columns(
+  dummy_set_te,
+  select_columns = NULL,
+  remove_first_dummy = TRUE,  
+  remove_most_frequent_dummy = FALSE,
+  ignore_na = FALSE,
+  split = NULL,
+  remove_selected_columns = TRUE,  
+  
+)
+
+
+smote_tuned <- SMOTE(X = dummy2, 
+                     target = dummy2$readmitted_2, 
+                     K= 2, dup_size = 6) # change dup_size here
+
+
+smote_tuned <- as.data.frame(smote_tuned$data)
+smote_tuned$readmitted_2<- as.factor(smote_tuned$readmitted_2)
+
+# remove class var
+smote_tuned <- smote_tuned[, !colnames(smote_tuned) %in% c("class")]
+
+# table of new counts
+table(smote_tuned$readmitted_2)
+
+# build model
+set.seed(10)
+TC <- trainControl( method = "CV", number = 10)
+
+smote_LR<- train(readmitted_2 ~ ., 
+               data = smote_tuned, 
+               method = "glm",
+               family = binomial,
+               trControl = TC,
+               maxit = 1000)
+summary(smote_LR)
+
+# predictions
+testsetpreds.LR <- predict(smote_LR, dummy_te2)
+table(dummy_te2$readmitted_2, testsetpreds.LR)
+
+# Calculate confusion matrix- using dummy te
+dummy_te2$readmitted_2<- as.factor(dummy_te2$readmitted_2)
+cm1 <- confusionMatrix(testsetpreds.LR, reference = dummy_te2$readmitted_2, positive = "1")
+print(cm1)
+```
+
+## BL SMOTE
+
+Borderline-SMOTE (BL SMOTE)
+
+Description:
+
+Generate synthetic positive instances using Borderline-SMOTE algorithm.
+The number of majority neighbor of each minority instance is used to
+divide minority instances into 3 groups; SAFE/DANGER/NOISE, only the
+DANGER are used to generate synthetic instances.
+
+-   Implemented Borderline-SMOTE algorithm to generate synthetic
+    positive instances.
+
+-   Used dup_size of 13 or 0 to maintain a 1:1 ratio of records.
+
+-   Developed another logistic regression model (smoteBL_LR) using the
+    BL SMOTE data.
+
+-   Assessed the model's performance on the test set (dummy_te2) using
+    confusion matrix analysis.
+
+```{r}
+
+set.seed(123)
+smote_BL <- BLSMOTE(X = dummy2, target = dummy2$readmitted_2, K=2,C=10,dupSize=0, method =c("type1","type2"))
+
+
+# Convert the list object to a data frame
+smote_BL <- as.data.frame(smote_BL$data)
+table(smote_BL$readmitted_2)
+
+
+# Set readmitted_1 as factor with levels 1 and 0
+#smote_BL$readmitted_1 <- factor(smote_BL$readmitted_1, levels = c("1", "0"))
+
+# Verify the levels of the factor variable
+levels(smote_BL$readmitted_2)
+table(smote_BL$readmitted_2)
+
+# remove class var
+smote_BL <- smote_BL[, !colnames(smote_BL) %in% c("class")]
+
+
+# LR model using BL SMOTE data
+smote_BL$readmitted_2<-as.factor(smote_BL$readmitted_2)
+set.seed(10)
+TC <- trainControl( method = "CV", number = 10)
+
+smoteBL_LR<- train(readmitted_2 ~ ., 
+               data = smote_BL, 
+               method = "glm",
+               family = binomial,
+               trControl = TC)
+summary(smoteBL_LR)
+
+# predictions
+testsetpreds.LR <- predict(smoteBL_LR, dummy_te2)
+table(dummy_te2$readmitted_2, testsetpreds.LR)
+
+# Calculate confusion matrix- using dummy te
+dummy_te2$readmitted_2<- as.factor(dummy_te2$readmitted_2)
+cm1 <- confusionMatrix(testsetpreds.LR, reference = dummy_te2$readmitted_2, positive = "1")
+print(cm1)
+
+```
+
+## ADASYN
+
+Description:
+
+Generate synthetic positive instances using ADASYN algorithm. The number
+of majority neighbors of each minority instance determines the number of
+synthetic instances generated from the minority instance.
+
+-   Implemented ADASYN SMOTE algorithm to generate synthetic positive
+    instances.
+
+-   Automatically produces 1:1 ratio
+
+    Developed another logistic regression model (ADASYN_LR) using the
+    smote_ADAS data
+
+-   Assessed the model's performance on the test set (dummy_te2) using
+    confusion matrix analysis.
+
+-   k values of 2, 10:15, 25, and 100 were tested
+
+```{r}
+
+set.seed(123)
+smote_ADAS <- ADAS(X = dummy2, target = dummy2$readmitted_2, K= 3)
+
+
+# Convert the list object to a data frame
+smote_ADAS <- as.data.frame(smote_ADAS$data)
+table(smote_ADAS$readmitted_2)
+
+
+# Set readmitted_1 as factor with levels 1 and 0
+#smote_ADAS$readmitted_2 <- factor(smote_ADAS$readmitted_2, levels = c("1", "0"))
+
+# Verify the levels of the factor variable
+#levels(smote_ADAS$readmitted_1)
+table(smote_ADAS$readmitted_2)
+
+# remove class var
+smote_ADAS <- smote_ADAS[, !colnames(smote_ADAS) %in% c("class")]
+
+# build LR model using ADASYN data
+smote_ADAS$readmitted_2<-as.factor(smote_ADAS$readmitted_2)
+set.seed(10)
+TC <- trainControl( method = "CV", number = 10)
+
+smoteADAS_LR<- train(readmitted_2 ~ ., 
+               data = smote_ADAS, 
+               method = "glm",
+               family = binomial,
+               trControl = TC)
+summary(smoteADAS_LR)
+
+# predictions
+testsetpreds.LR <- predict(smoteADAS_LR, dummy_te2)
+table(dummy_te2$readmitted_2, testsetpreds.LR)
+
+# Calculate confusion matrix- using dummy te
+dummy_te2$readmitted_2<- as.factor(dummy_te2$readmitted_2)
+cm1 <- confusionMatrix(testsetpreds.LR, reference = dummy_te2$readmitted_2, positive = "1")
+print(cm1)
+
+```
+
+
+
+For the LR models the following steps were taken:
+
+-   Set the seed to ensure reproducibility of random processes.
+-   Defined a cross-validation method (TC) using 10-fold
+    cross-validation.
+-   Converted the target variable (readmitted_2) to a factor
+-   Trained a logistic regression model (glm) using the train function
+    from caret package
+-   Included all predictor variables
+-   Displayed a summary of the trained logistic regression model
+-   Generated predictions (testsetpreds) on the test set using the
+    trained model
+-   Created a confusion matrix (cm1) to evaluate the performance of the
+    model on the test set
+
+Model Fit: -
+
+-   Plotted a ROC curve and calculated the AUC (Area Under the Curve) to
+    assess the model's discrimination ability
+
+-   Conducted the Hosmer-Lemeshow test (hoslem_test) to assess the
+    goodness-of-fit of the logistic regression model
+
+## Unbalanced data, full set of predictors
+
+train data: train_set2 test data: test_set2
+
+```{r}
+set.seed(10)
+TC <- trainControl( method = "CV", number = 10)
+train_set2$readmitted_2<-as.factor(train_set2$readmitted_2)
+
+model <- train(readmitted_2 ~ 
+           # patient demographic vars
+                 gender  + 
+                 age  + 
+                 race +
+             
+             # provider characteristics
+                 specialty +
+             
+             # encounter characteristics
+                 admission_source_id +
+                 admission_type_id +
+                 discharge +
+                 log_time_hosp + 
+            
+             # provider/ hospital intervention
+                 A1Cresult +
+                 log_num_lab +
+                 log_num_med +
+             
+             # patient medical history characteristics 
+                 diabetesMed +
+                 preceding_visits_binary+
+                 log_scores,
+                 
+                 data = train_set2, 
+               method = "glm",
+               family = binomial,
+               trControl = TC)
+
+# model summary
+summary(model)
+
+# predictions
+testsetpreds <- predict(model, test_set2)
+table(test_set2$readmitted_2, testsetpreds)
+
+# confusion matrix
+test_set2$readmitted_2<- as.factor(test_set2$readmitted_2)
+cm1 <- confusionMatrix(testsetpreds, reference = test_set2$readmitted_2, positive = "1")
+print(cm1)
+
+# AUC
+roc_curve <- roc(test_set2$readmitted_2, as.numeric(testsetpreds))
+plot(roc_curve, main = "ROC Curve for LASSO Model", col = "blue", lwd = 2)
+auc_value <- auc(roc_curve)
+print(paste("AUC:", auc_value))
+
+
+# Assess model fit Hosmer-Lemeshow test
+hoslem_test <- hoslem.test(train_set2$readmitted_2, fitted(model), g = 10)
+print(hoslem_test)
+
+
+```
+
+Mcnemar's Test P-Value: This extremely low p-value (\<2e-16) suggests a
+significant difference in the performance of the model between the
+positive and negative classes. In this case, since the sensitivity is
+reported as 0.0000, it indicates that the model is unable to correctly
+identify any of the positive cases, leading to a lack of sensitivity.
+The high specificity (1.0000) indicates that the model is correctly
+identifying all negative cases. However, the lack of positive predictive
+value (NaN) suggests that the model is not providing any meaningful
+predictions for the positive class, likely due to the imbalance in the
+dataset.
+
+AUC (Area Under the Curve): The AUC value of 0.5 indicates that the
+model's discrimination ability is no better than random chance. This
+could be due to the model's inability to correctly identify positive
+cases, as indicated by the sensitivity of 0.0000.
+
+Hosmer-Lemeshow Test: The extremely low p-value (\< 2.2e-16) suggests
+that the model's fit is not good. This could be due to various reasons,
+including model misspecification, overfitting, or the influence of
+unmodeled variables.
+
+## Unbalanced data, significant variables
+
+-   using unbalanced data and only significant variables
+
+```{r}
+set.seed(10)
+  TC <- trainControl( method = "CV", number = 10)
+
+train_set2$readmitted_2<-as.factor(train_set2$readmitted_2)
+
+model <- train(readmitted_2 ~ 
+           # patient demographic vars
+               #  gender  + 
+                age  + 
+               #  race +
+             
+             # provider characteristics
+               #  specialty +
+             
+             # encounter characteristics
+                 admission_source_id +
+                 admission_type_id +
+                 discharge +
+                 log_time_hosp + 
+            
+             # provider/ hospital intervention
+              #   A1Cresult +
+                 log_num_lab +
+                # log_num_med +
+             
+             # patient medical history characteristics 
+                 diabetesMed +
+                 preceding_visits_binary+
+                 log_scores,
+                 
+                 data = train_set2, 
+               method = "glm",
+               family = binomial,
+               trControl = TC)
+
+# model summary
+summary(model)
+
+# predictions
+testsetpreds <- predict(model, test_set2)
+table(test_set2$readmitted_2, testsetpreds)
+
+# confusion matrix
+test_set2$readmitted_2<- as.factor(test_set2$readmitted_2)
+cm1 <- confusionMatrix(testsetpreds, reference = test_set2$readmitted_2, positive = "1")
+print(cm1)
+
+# AUC
+roc_curve <- roc(test_set2$readmitted_2, as.numeric(testsetpreds))
+plot(roc_curve, main = "ROC Curve for LASSO Model", col = "blue", lwd = 2)
+auc_value <- auc(roc_curve)
+print(paste("AUC:", auc_value))
+
+# Assess model fit Hosmer-Lemeshow test
+hoslem_test <- hoslem.test(train_set2$readmitted_2, fitted(model), g = 10)
+print(hoslem_test)
+
+
+
+```
+
+Removing insignificant variables did not have a significant effect on
+the model's performance.
+
+## Balanced data, full set of predictors
+
+After accounting for multicollinearity, adding preceding visits , adding
+discharge as binary variable, comorbidity scores (after testing
+charlson/elixhauser scores), and with filtered df, a LR model was built
+using the balanced data and all predictors.
+
+```{r}
+
+set.seed(10)
+  TC <- trainControl( method = "CV", number = 10)
+
+# data_subset was defined in the verifying model assumptions step, which is train_set_balanced2 but no high lev
+train_set_balanced2$readmitted_2<-as.factor(train_set_balanced2$readmitted_2)
+
+model <- train(readmitted_2 ~ 
+           # patient demographic vars
+                 gender  + 
+                 age  + 
+                 race +
+             
+             # provider characteristics
+                 specialty +
+             
+             # encounter characteristics
+                 admission_source_id +
+                 admission_type_id +
+                 discharge +
+                 log_time_hosp + 
+            
+             # provider/ hospital intervention
+                 A1Cresult +
+                 log_num_lab +
+                 log_num_med +
+             
+             # patient medical history characteristics 
+                 diabetesMed +
+                 preceding_visits_binary+
+                 log_scores,
+                 
+                 data = train_set_balanced2, 
+               method = "glm",
+               family = binomial,
+               trControl = TC)
+
+# model summary
+summary(model)
+
+# results
+testsetpreds <- predict(model, test_set2)
+table(test_set2$readmitted_2, testsetpreds)
+
+# Calculate confusion matrix- using dummy te
+test_set2$readmitted_2<- as.factor(test_set2$readmitted_2)
+cm1 <- confusionMatrix(testsetpreds, reference = test_set2$readmitted_2, positive = "1")
+print(cm1)
+
+
+roc_curve <- roc(test_set2$readmitted_2, as.numeric(testsetpreds))
+plot(roc_curve, main = "ROC Curve for LASSO Model", col = "blue", lwd = 2)
+auc_value <- auc(roc_curve)
+print(paste("AUC:", auc_value))
+
+
+
+# Predict probabilities for test set
+predicted_probabilities <- predict(model, newdata = test_set2, type = "prob")
+# Convert predicted probabilities to binary outcomes
+predicted_outcomes <- ifelse(as.numeric(as.character(predicted_probabilities)) >= 0.5, 1, 0)
+
+# Assess model fit Hosmer-Lemeshow test
+hoslem_test <- hoslem.test(train_set_balanced2$readmitted_2, fitted(model), g = 10)
+print(hoslem_test)
+
+```
+
+Gender is insignificant so it was removed from the model, but model
+accuracy and sensivity drops when gender is removed. gender was retained in the model despite its insignificance.
+
+### LASSO
+
+LASSO was performed on the balanced data and model using full set of predictors. 
+
+-   Extract predictors and outcome variables from the training dataset.
+
+-   Prepare the test dataset by removing the outcome variable and its
+    binary representation.
+
+-   Fit a LASSO logistic regression model using cross-validated glmnet,
+    specifying the binomial family and alpha as 1.
+
+-   Plot the cross-validated mean squared error (CV MSE) as a function
+    of lambda.
+
+-   Extract the optimal lambda value from the model.
+
+-   Print coefficients of the selected variables at the optimal lambda
+    value.
+
+-   Use the model to predict outcomes for the test dataset.
+
+-   Convert predicted probabilities to binary class predictions (0 or 1)
+    using a threshold of 0.5.
+
+-   Create a confusion matrix to evaluate the model's performance on the
+    test dataset.
+
+-   Plot the ROC curve to assess the model's performance further
+
+-   Calculate the AUC (Area Under the Curve) value and print it.
+
+```{r}
+
+
+# set reference levels
+
+train_set_balanced2$admission_source_id <- relevel(train_set_balanced2$admission_source_id, ref = "Missing")
+train_set_balanced2$admission_type_id <- relevel(train_set_balanced2$admission_type_id, ref = "Missing")
+
+# Columns to convert to dummy variables
+cols_to_dummy <- c("race", "gender", "admission_type_id", "admission_source_id", "readmitted_2", "discharge",
+                   "log_num_lab", "log_num_med", "preceding_visits_binary", "log_scores",
+                   "change", "diabetesMed", "A1Cresult", "log_time_hosp")
+
+
+                 
+
+# Create dummy variables for train_set_balanced2
+dummy4 <- fastDummies::dummy_cols(train_set_balanced2[, cols_to_dummy], remove_first_dummy = TRUE)
+
+# Create dummy variables for test_set2
+dummy_te4 <- fastDummies::dummy_cols(test_set2[, cols_to_dummy], remove_first_dummy = TRUE)
+
+# Remove the variable readmitted_2_1
+dummy4 <- dummy4[, !colnames(dummy4) %in% "readmitted_2_1"]
+# Remove the variable readmitted_2_1
+dummy_te4 <- dummy_te4[, !colnames(dummy4) %in% "readmitted_2_1"]
+
+
+
+# predictors
+X <- subset(dummy4, select = -readmitted_2)
+# outcome
+y <- dummy4$readmitted_2
+
+dummy_te4$readmitted_2<- dummy_te4$readmitted_2
+dummy4$readmitted_2<- dummy4$readmitted_2
+
+X_test <- subset(dummy_te4, select = -c(readmitted_2, readmitted_2_1))
+y_test <- dummy_te2$readmitted_2 #same here
+
+# Fit LASSO logistic regression model
+lasso_model <- cv.glmnet(as.matrix(X), y, family = "binomial", alpha = 1)
+
+# Plot the cross-validated mean squared error (CV MSE) as a function of lambda
+plot(lasso_model)
+
+# Extract the optimal lambda value
+optimal_lambda <- lasso_model$lambda.min
+print(paste("Optimal lambda:", optimal_lambda))
+
+# Get coefficients of the selected variables
+lasso_coefficients <- coef(lasso_model, s = optimal_lambda)
+print(lasso_coefficients)
+
+# used to visualize the cross-validated deviance (or loss) as a function of the log of lambd
+
+
+
+# Predict using the LASSO model
+predicted_values <- predict(lasso_model, newx = as.matrix(X_test), s = optimal_lambda, type = "response")
+
+# Convert predicted probabilities to class predictions (0 or 1)
+predicted_classes <- ifelse(predicted_values > 0.5, 1, 0)
+
+# Create the confusion matrix
+confusion_matrix <- table(Actual = y_test, Predicted = predicted_classes)
+print(confusion_matrix)
+
+
+# Calculate ROC curve
+roc_curve <- roc(y_test, predicted_values)
+plot(roc_curve, main = "ROC Curve for LASSO Model", col = "blue", lwd = 2)
+abline(a = 0, b = 1, col = "red", lty = 2)
+
+# Calculate AUC
+auc_value <- auc(roc_curve)
+print(paste("AUC:", round(auc_value, 3)))
+```
+
+Among the significant predictors, a higher number of preceding visits, longer hospitalization time, Caucasian race, and diabetes medication usage are associated with increased odds of readmission. Conversely, discharge to a location other than home, missing race data, and certain admission sources are associated with decreased odds of readmission. Notably, the number of lab procedures after Box-Cox transformation and the log-transformed number of medications show negligible effects on readmission likelihood. 
+
+Stepwise variable selection procedures were also implemented to assess how impactful variables are on the model.
+
+
+### stepwise variable selection
+
+```{r}
+
+
+# Fit a full logistic regression model using the balanced data
+full_model <- glm(readmitted_2 ~ log_scores + gender + age + race + + discharge + admission_source_id + admission_type_id+ specialty  + A1Cresult + change + log_time_hosp + log_num_lab + insulin + num_medications + preceding_visits_binary  + diabetesMed, 
+                   data = train_set_balanced2, 
+                   family = binomial)
+
+
+# Perform stepwise selection with both forward and backward steps using stepAIC
+
+stepwise_forward <- stepAIC(full_model, direction = "forward")
+summary(stepwise_forward)
+
+stepwise_backward <- stepAIC(full_model, direction = "backward")
+summary(stepwise_backward)
+
+```
+The stepwise selection procedure using both forward and backward steps was employed to identify the most significant predictors of readmission likelihood. The forward stepwise selection procedure started with an initial model including various demographic and clinical features. Notably, after evaluating the model fit using the AIC, the stepwise procedure identified log_scores, num_medications, and gender as non-significant predictors and excluded them from the final model. 
+
+Conversely, the backward stepwise selection procedure, starting with the same initial model, identified log_scores and num_medications as non-significant predictors and removed them from the final model. Both forward and backward stepwise procedures converged to similar final models, comprising significant predictors such as age, race, specialty, discharge status, admission source, admission type, A1Cresult, change in medication, log-transformed hospitalization time, transformed number of lab procedures, insulin usage, the number of medications, preceding visits, and diabetes medication usage. 
+
+Prior to removing these variables from the model to assess how they effect model performance, high leverage points were assessed.  
+
+### High-leverage points
+
+tested high leverage points at cutoff values 1.5*p/n, 1.8*p/n, 2*p/n,
+3*p/n and 4\*p/n. Neither cutoff point improves metrics enough to
+warrant removing these points
+
+-   Fitted a logistic regression model using the entire data set
+-   Made predictions on the test set using the logistic model
+-   Converted predicted probabilities to binary predictions using a
+    threshold of 0.5
+-   Calculated the confusion matrix for the logistic regression model
+-   Calculated leverage and identified observations with high leverage
+-   Created a subset excluding observations with high leverage
+-   Retested the logistic regression model with the subset data
+-   Checked the data type of the variable 'preceding_visits_binary' in
+    the test set
+-   Made predictions on the test set using the logistic model with the
+    subset data
+-   Converted predicted probabilities to binary predictions for the
+    subset model
+-   Calculated the confusion matrix for the subset model
+-   Assessed the model fit using the Hosmer-Lemeshow test, indicating
+    larger AIC score and x value for the subset
+    
+    
+
+```{r}
+# Fit a logistic regression model for HLP
+logistic_model <- glm(readmitted_2 ~ ., data = data, family = binomial)
+
+# Make predictions on the test set
+testsetpreds.LR <- predict(logistic_model, newdata = data_test, type = "response")
+
+
+# Convert predicted probabilities to binary predictions
+predicted_binary <- ifelse(testsetpreds.LR > 0.5, "1", "0")
+predicted_binary<- as.factor(predicted_binary)
+
+#data_test$readmitted_2<-as.factor(data_test$readmitted_2)
+
+# Calculate confusion matrix
+cm1 <- confusionMatrix(predicted_binary, reference = data_test$readmitted_2)
+print(cm1)
+
+
+# Calculate leverage points
+leverage <- hatvalues(logistic_model)
+
+# Identify observations with high leverage (e.g., leverage > 2*p/n)
+high_leverage <- which(leverage > 3 * ncol(model.matrix(logistic_model)) / nrow(dfC))
+
+# Display high leverage points
+print(high_leverage)
+
+```
+#### HLP subset
+
+```{r}
+# Create subset excluding high leverage observations
+data_subset <- data[-high_leverage, ]
+
+# Check summary of data_subset
+summary(data_subset)
+# larger values of (log) time in hospital compared to original data set
+
+# set readmitted as factor
+#data_subset$readmitted_2<-as.factor(data_subset$readmitted_2)
+
+# Retest the logistic regression model with subset without HLP
+my_logit_model_subset <- glm(readmitted_2 ~ ., data = data_subset, family = binomial)
+summary(my_logit_model_subset)
+
+# Check the data type of 'preceding_visits_binary' in data_test
+#class(data_test$preceding_visits_binary)
+
+
+# Make predictions on the test set
+testsetpreds.LR <- predict(my_logit_model_subset, newdata = data_test, type = "response")
+
+
+# Convert predicted probabilities to binary predictions
+predicted_binary <- ifelse(testsetpreds.LR > 0.5, "1", "0")
+predicted_binary<- as.factor(predicted_binary)
+
+data_subset$readmitted_2<-as.factor(data_subset$readmitted_2)
+data_test$readmitted_2<-as.factor(data_test$readmitted_2)
+
+# Calculate confusion matrix
+cm1 <- confusionMatrix(predicted_binary, reference = data_test$readmitted_2)
+print(cm1)
+
+
+
+
+
+```
+
+#### assess high leverage points
+
+```{r}
+# Access high leverage records
+high_leverage_indices <- which(leverage > 3 * ncol(model.matrix(logistic_model)) / nrow(dfC))
+
+# Create subset including only high leverage observations
+high_leverage_subset <- data[high_leverage_indices, ]
+
+# Check summary of the subset
+summary(high_leverage_subset)
+
+
+# Count the number of unique records in the subset
+nrow(unique(high_leverage_subset))
+
+
+```
+
+## Balanced data, significant predictors
+
+Using the balanced data without high leverage points and significant predictors only.
+
+After trial and error of experimenting with adding and removing different variables, the following combination of variables has the best overall predictive power of all models thus far. Introducing additional variables such as age or insulin either decreases model performance or does not contribute predictive power enough to warrant keeping them.
+
+
+```{r}
+
+
+data_subset$admission_source_id <- relevel(data_subset$admission_source_id, ref = "Missing")
+data_subset$admission_type_id <- relevel(data_subset$admission_type_id, ref = "Missing")
+
+
+# Build model
+my_logit_model_subset <- glm(readmitted_2 ~
+                              
+                             log_num_lab +
+                             log_num_med +
+                             preceding_visits_binary +
+                             log_scores +
+                             log_time_hosp +
+                             race +
+                             gender +
+                             admission_type_id +            
+                            admission_source_id +
+                            #discharge +
+                            change +
+                            diabetesMed + 
+                            A1Cresult,
+                           data = data_subset, family = binomial)
+
+# Model summary
+summary(my_logit_model_subset)
+
+
+# Make predictions on the test set
+testsetpreds.LR <- predict(my_logit_model_subset, newdata = data_test, type = "response")
+
+
+# Convert predicted probabilities to binary predictions
+predicted_binary <- ifelse(testsetpreds.LR > 0.5, "1", "0")
+predicted_binary<- as.factor(predicted_binary)
+
+data_subset$readmitted_2<-as.factor(data_subset$readmitted_2)
+data_test$readmitted_2<-as.factor(data_test$readmitted_2)
+
+# Calculate confusion matrix
+cm1 <- confusionMatrix(predicted_binary, reference = data_test$readmitted_2)
+print(cm1)
+
+
+
+# Assess model fit Hosmer-Lemeshow test
+#library(ResourceSelection)
+hoslem_test <- hoslem.test(data_subset$readmitted_2, fitted(my_logit_model_subset), g = 10)
+print(hoslem_test)
+```
+### VIF
+ VIF using balanced data and significant predictors
+
+-   Checked for multicollinearity using the Variance Inflation Factor on the model with balanced data and significant predictors 
+    (VIF)
+-   Obtained VIF results using the car::vif function
+-   No significant multicollinearity was detected
+
+```{r}
+#  Check for multicollinearity
+vif_results <- car::vif(my_logit_model_subset)
+print(vif_results)
+
+```
+
+
+### LASSO
+LASSO using balanced data and significant predictors
+```{r}
+
+
+# set reference levels
+
+data_subset$admission_source_id <- relevel(data_subset$admission_source_id, ref = "Missing")
+data_subset$admission_type_id <- relevel(data_subset$admission_type_id, ref = "Missing")
+
+# Columns to convert to dummy variables
+cols_to_dummy <- c("readmitted_2",
+                   "race",
+                   "gender", 
+                   "admission_type_id", 
+                   "admission_source_id", 
+                   "log_num_lab", 
+                   "log_num_med", 
+                   "preceding_visits_binary",
+                   "change",
+                   "diabetesMed",
+                   "A1Cresult", 
+                   "log_time_hosp")
+
+# Create dummy variables for train_set_balanced2
+dummy4 <- fastDummies::dummy_cols(data_subset[, cols_to_dummy], remove_first_dummy = TRUE)
+
+# Create dummy variables for test_set2
+dummy_te4 <- fastDummies::dummy_cols(test_set2[, cols_to_dummy], remove_first_dummy = TRUE)
+
+# Remove the variable readmitted_2_1
+dummy4 <- dummy4[, !colnames(dummy4) %in% "readmitted_2_1"]
+# Remove the variable readmitted_2_1
+dummy_te4 <- dummy_te4[, !colnames(dummy4) %in% "readmitted_2_1"]
+
+
+
+# predictors
+X <- subset(dummy4, select = -readmitted_2)
+# outcome
+y <- dummy4$readmitted_2
+
+dummy_te4$readmitted_2<- dummy_te4$readmitted_2
+dummy4$readmitted_2<- dummy4$readmitted_2
+
+X_test <- subset(dummy_te4, select = -c(readmitted_2, readmitted_2_1))
+y_test <- dummy_te2$readmitted_2 #same here
+
+# Fit LASSO logistic regression model
+lasso_model <- cv.glmnet(as.matrix(X), y, family = "binomial", alpha = 1)
+
+# Plot the cross-validated mean squared error (CV MSE) as a function of lambda
+plot(lasso_model)
+
+# Extract the optimal lambda value
+optimal_lambda <- lasso_model$lambda.min
+print(paste("Optimal lambda:", optimal_lambda))
+
+# Get coefficients of the selected variables
+lasso_coefficients <- coef(lasso_model, s = optimal_lambda)
+print(lasso_coefficients)
+
+# used to visualize the cross-validated deviance (or loss) as a function of the log of lambd
+
+
+
+# Predict using the LASSO model
+predicted_values <- predict(lasso_model, newx = as.matrix(X_test), s = optimal_lambda, type = "response")
+
+# Convert predicted probabilities to class predictions (0 or 1)
+predicted_classes <- ifelse(predicted_values > 0.5, 1, 0)
+
+# Create the confusion matrix
+confusion_matrix <- table(Actual = y_test, Predicted = predicted_classes)
+print(confusion_matrix)
+
+# Assign values
+TP <- 731
+TN <- 4400
+FP <- 3157
+FN <- 413
+
+# Calculate accuracy
+accuracy <- (TP + TN) / (TP + TN + FP + FN)
+
+# Calculate sensitivity
+sensitivity <- TP / (TP + FN)
+
+# Print results
+print(paste("Accuracy:", round(accuracy, 3)))
+print(paste("Sensitivity:", round(sensitivity, 3)))
+
+
+
+# Calculate ROC curve
+roc_curve <- roc(y_test, predicted_values)
+
+# Plot ROC curve
+plot(roc_curve, main = "ROC Curve for LASSO Model", col = "blue", lwd = 2)
+
+# Add diagonal line for reference (random classifier)
+abline(a = 0, b = 1, col = "red", lty = 2)
+
+# Calculate AUC
+auc_value <- auc(roc_curve)
+
+# Print AUC value
+print(paste("AUC:", round(auc_value, 3)))
+```
+
+
+
+
+### odds ratios
+
+constructing odds ratios from the final LR model
+
+- A vector named `coef` is defined to store the estimated coefficients from the logistic regression model. Each coefficient corresponds to a predictor variable in the model.
+
+-  The `exp()` function is utilized to exponentiate each coefficient, resulting in the calculation of the odds ratio for each predictor variable. This transformation converts the coefficients from the log-odds scale to the odds ratio scale.
+
+-  A `for` loop is employed to iterate through each variable in the `coef` vector. During each iteration, the variable name and its corresponding odds ratio are printed. This facilitates a clear display of the odds ratios for each predictor variable in the model.
+
+
+```{r}
+# Coefficients
+coef <- c(
+  "Intercept" = -1.798456,
+  "raceCaucasian" = 0.0778818,
+  "raceMissing" = -0.2048932,
+  "raceOther" = -0.1976759,
+  "genderMale" = -0.0139739,
+  "admission_type_idElective" = -0.2140340,
+  "admission_type_idER_trauma" = -0.2321442,
+  "admission_type_idUrgent" =  -0.0965799,
+  "admission_source_idER" =  0.2468480,
+  "admission_source_idOther" =  0.2619978,
+  "admission_source_idrefferal" =  0.0643370,
+  "admission_source_idtransfer" = -0.1333574,
+  "log_num_lab" = 0.1086691,
+  "log_num_med" = 0.0680777,
+  "preceding_visits_binary" = 0.7984369,
+  "changeNo" = 0.0488558,
+  "diabetesMedYes" = 0.2865033,
+  "A1Cresult>8" = 0.0475206,
+  "A1CresultNone" = 0.3052239,
+  "A1CresultNorm" = 0.0740764,
+  "log_time_hosp" = 0.3893001,
+  "log_scores" = -0.0008895
+)
+
+# Exponentiate coefficients to obtain odds ratios
+odds_ratios <- exp(coef)
+
+# Print variable names and corresponding odds ratios
+for (variable in names(coef)) {
+  cat( variable, odds_ratios[variable], "\n")
+}
+
+```
+
+## LR, balanced, significant, standardized
+trying with all numeric predictors standardized
+
+```{r}
+
+
+# Function to standardize numeric variables
+standardize_numeric <- function(data) {
+  # Select numeric variables
+  numeric_vars <- Filter(is.numeric, data)
+  
+  # Calculate mean and standard deviation for each numeric variable
+  means <- colMeans(numeric_vars, na.rm = TRUE)
+  sds <- apply(numeric_vars, 2, sd, na.rm = TRUE)
+  
+  # Standardize each numeric variable
+  standardized_data <- scale(numeric_vars, center = means, scale = sds)
+  
+  # Replace original numeric variables with standardized ones
+  data[ , names(numeric_vars)] <- standardized_data
+  
+  return(data)
+}
+
+# Standardize trainset2
+data_subset <- standardize_numeric(data_subset)
+
+# Standardize test_set2
+data_test <- standardize_numeric(test_set2)
+
+
+
+data_subset$admission_source_id <- relevel(data_subset$admission_source_id, ref = "Missing")
+data_subset$admission_type_id <- relevel(data_subset$admission_type_id, ref = "Missing")
+
+
+# Build model
+my_logit_model_subset <- glm(readmitted_2 ~ ., data = data_subset, family = binomial)
+
+# Model summary
+summary(my_logit_model_subset)
+
+
+# Make predictions on the test set
+testsetpreds.LR <- predict(my_logit_model_subset, newdata = data_test, type = "response")
+
+
+# Convert predicted probabilities to binary predictions
+predicted_binary <- ifelse(testsetpreds.LR > 0.5, "1", "0")
+predicted_binary<- as.factor(predicted_binary)
+
+data_subset$readmitted_2<-as.factor(data_subset$readmitted_2)
+data_test$readmitted_2<-as.factor(data_test$readmitted_2)
+
+# Calculate confusion matrix
+cm1 <- confusionMatrix(predicted_binary, reference = data_test$readmitted_2)
+print(cm1)
+
+
+```
+
+
+
+
+
+
+
+
+## RF base model
+
+For all RF models, the following steps were taken:
+
+Random forest model (rf_model) is trained on a random subset of 10,000
+rows from the training dataset. - Class weights of 1 for majority class
+(0) and 20 for minority class (1) are assigned. Model predicts
+readmitted_2 based on various features, with importance and proximity
+measures computed.
+
+-   Trained model applied to test set, generating predictions
+    (testsetpreds_rf).
+-   Confusion matrix computed to evaluate model performance.
+-   Performance metrics (sensitivity, specificity, accuracy) calculated.
+-   ROC curve plotted, indicating model discrimination ability.
+-   AUC value printed as summary of ROC curve, representing overall
+    model performance.
+
+THe RF base model uses significant predictors and balanced (oversampled)
+data set
+
+```{r}
+
+set.seed(123)
+
+
+rf_train <- train_set_balanced2[, c(
+                       "race", "gender", 
+                       "admission_type_id" , 
+                       "admission_source_id" ,
+                       "log_num_lab", 
+                       "log_num_med" ,   
+                       "preceding_visits_binary",
+                       
+                       "change",
+                       "diabetesMed" ,  
+                       "A1Cresult", 
+                        
+                       "log_time_hosp",
+                       "readmitted_2", 
+                       "log_scores")]
+
+rf_test <- test_set2[, c(
+                       "race", "gender", 
+                       "admission_type_id" , 
+                       "admission_source_id" ,
+                       "log_num_lab", 
+                       "log_num_med" ,   
+                       "preceding_visits_binary",
+                       
+                       "change",
+                       "diabetesMed" ,  
+                       "A1Cresult", 
+                        
+                       "log_time_hosp",
+                       "readmitted_2", 
+                       "log_scores")]
+
+
+
+
+
+rf_train$readmitted_2<- as.factor(rf_train$readmitted_2)
+rf_test$readmitted_2<- as.factor(rf_test$readmitted_2)
+
+# to computationally intense
+# Randomly sample rows from dataset
+random_subset <- rf_train[sample(nrow(rf_train), 5000), ]
+
+# assign weights 
+
+class_weights <- c(1,5)  # Adjust the weights as needed
+
+set.seed(71)
+rf_model <- randomForest(readmitted_2 ~ ., data=random_subset, 
+                        importance=TRUE,
+                        classwt = class_weights,
+                        proximity=TRUE)
+
+
+# Summary of the model
+#summary(rf_model)
+
+# Apply RF model to test set
+testsetpreds_rf <- predict(rf_model, test_set2)
+
+# Confusion matrix
+table(test_set2$readmitted_2, testsetpreds_rf)
+
+# Calculate performance metrics
+cm_rf <- confusionMatrix(testsetpreds_rf, rf_test$readmitted_2, positive="1", mode="everything")
+print(cm_rf)
+
+
+# ROC
+roc_curve <- roc(test_set2$readmitted_2, as.numeric(testsetpreds_rf))
+plot(roc_curve, main = "ROC Curve for LASSO Model", col = "blue", lwd = 2)
+
+# AUC
+auc_value <- auc(roc_curve)
+print(paste("AUC:", auc_value))
+
+```
+
+## RF tuned with SMOTE
+
+using smote data and tuning class weights
+
+```{r}
+set.seed(123)
+
+
+# Subset DataFrame to include only required columns
+dummy_set <- train_set2[, c("readmitted_2",
+                            "age",
+                            "race", 
+                            "gender", 
+                            "admission_type_id" ,
+                            "admission_source_id" ,
+                            "num_medications" ,
+                            "change", 
+                            "diabetesMed" ,  
+                            "A1Cresult",
+                            "discharge",
+                            "log_time_hosp", 
+                            "log_num_lab",
+                            "preceding_visits_binary",
+                            "log_scores" 
+                              )]
+
+# Identify factor variables
+factor_variables <- sapply(dummy_set, is.factor)
+
+# Use dummy_columns function
+dummy2 <- dummy_columns(
+  dummy_set,
+  select_columns = NULL,
+  remove_first_dummy = TRUE,  # Remove the first dummy variable for each categorical variable
+  remove_most_frequent_dummy = FALSE,
+  ignore_na = FALSE,
+  split = NULL,
+  remove_selected_columns = TRUE,  # Remove original columns after creating dummy variables
+  
+)
+
+# Subset DataFrame to include only required columns
+dummy_set_te <- test_set2[, c("readmitted_2",
+                            "age",
+                            "race", 
+                            "gender", 
+                            "admission_type_id" ,
+                            "admission_source_id" ,
+                            "num_medications" ,
+                            "change", 
+                            "diabetesMed" ,  
+                            "A1Cresult",
+                           "discharge",
+                            
+                            "log_time_hosp", 
+                            "log_num_lab",
+                            "preceding_visits_binary",
+                            "log_scores"
+                              )]
+
+# Identify factor variables
+factor_variables <- sapply(dummy_set_te, is.factor)
+
+# Use dummy_columns function
+dummy_te2 <- dummy_columns(
+  dummy_set_te,
+  select_columns = NULL,
+  remove_first_dummy = TRUE,  # Remove the first dummy variable for each categorical variable
+  remove_most_frequent_dummy = FALSE,
+  ignore_na = FALSE,
+  split = NULL,
+  remove_selected_columns = TRUE,  # Remove original columns after creating dummy variables
+)
+
+smote_tuned <- SMOTE(X = dummy2, 
+                     target = dummy2$readmitted_2, 
+                     K= 10, dup_size = 6)
+
+# dupsize 5 for dummy2 set
+smote_tuned <- as.data.frame(smote_tuned$data)
+smote_tuned$readmitted_2<- as.factor(smote_tuned$readmitted_2)
+# remove class var
+smote_tuned <- smote_tuned[, !colnames(smote_tuned) %in% c("class")]
+
+table(smote_tuned$readmitted_2)
+
+rf_train<- smote_tuned
+rf_test<- dummy_te2
+
+
+# Replace "/" with "_" in column names of rf_train
+colnames(rf_train) <- gsub("/", "_", colnames(rf_train))
+colnames(rf_train) <- gsub(">", "greater_than_", colnames(rf_train))
+colnames(rf_train) <- gsub("-", "_", colnames(rf_train))
+#colnames(rf_train) <- gsub("60+", "60_above", colnames(rf_train))
+
+# test set
+colnames(rf_test) <- gsub("/", "_", colnames(rf_test))
+colnames(rf_test) <- gsub(">", "greater_than_", colnames(rf_test))
+colnames(rf_test) <- gsub("-", "_", colnames(rf_test))
+
+
+rf_train$readmitted_2<- as.factor(rf_train$readmitted_2)
+rf_test$readmitted_2<- as.factor(rf_test$readmitted_2)
+
+
+```
+
+```{r}
+
+
+set.seed(124)
+
+# due to memory issues, need to select subset of records
+# Randomly sample rows from  dataset
+random_subset <- rf_train[sample(nrow(rf_train), 10000), ]
+
+# assign weights 
+class_weights <- c(1, 20)  # Adjust the weights as needed
+
+
+set.seed(71)
+rf_model <- randomForest(readmitted_2 ~ ., data=random_subset, 
+                        importance=TRUE,
+                       classwt = class_weights,
+                        proximity=TRUE)
+
+
+# Summary of the model
+#summary(rf_model)
+
+# Apply RF model to test set
+testsetpreds_rf <- predict(rf_model, rf_test)
+
+# Confusion matrix
+table(rf_test$readmitted_2, testsetpreds_rf)
+
+# Calculate performance metrics
+cm_rf <- confusionMatrix(testsetpreds_rf, rf_test$readmitted_2, positive="1", mode="everything")
+print(cm_rf)
+
+# ROC
+roc_curve <- roc(rf_test$readmitted_2, as.numeric(testsetpreds_rf))
+plot(roc_curve, main = "ROC Curve for RF Model", col = "blue", lwd = 2)
+
+# AUC
+auc_value <- auc(roc_curve)
+print(paste("AUC:", auc_value))
+
+
+
+
+```
+
+# XGB base
+
+In building the XGboost models, sizes of max_depth between 2 and 5 were tested, eta between 0.001 and 1, were tested and nrounds was tested between 10-500
+
+XGboost base is the xgboost model using unbalanced data
+
+```{r}
+
+set.seed(123)
+
+train_data<- train_set2
+test_data <- test_set2
+
+
+## Keep the number of threads to 1 for examples
+nthread <- 1
+
+
+
+predictors <- subset(train_data, select = c("gender", "age", "race", "specialty",  "admission_source_id", "admission_type_id", "discharge", "log_time_hosp", "A1Cresult", "log_num_lab", "log_num_med",  "diabetesMed", "preceding_visits_binary"))
+
+
+predictors_te <-subset(test_data, select = c("gender", "age", "race", "specialty",  "admission_source_id", "admission_type_id", "discharge", "log_time_hosp", "A1Cresult", "log_num_lab", "log_num_med",  "diabetesMed", "preceding_visits_binary"))
+
+
+# Convert label column to numeric vector
+# For training data
+labels <- as.factor(train_data$readmitted_2)
+
+# For test data
+labels_te <- as.factor(test_data$readmitted_2)
+
+labels_te <- as.numeric(as.factor(labels_te)) - 1
+labels <- as.numeric(as.factor(labels)) - 1
+
+
+
+# Convert categorical variables to dummy variables
+predictors <- model.matrix(~., data = predictors)
+
+# Convert predictors data frame to a numeric matrix
+predictors_matrix <- as.matrix(predictors)
+
+# Check the structure and class of 'predictors_matrix' again
+str(predictors_matrix)
+
+# Create the DMatrix object for training data
+dtrain <- xgb.DMatrix(data = predictors_matrix, label = labels, nthread = nthread)
+
+
+
+# Convert categorical variables to dummy variables
+predictors_te <- model.matrix(~., data = predictors_te)
+
+# Convert predictors data frame to a numeric matrix
+predictors_matrix_te <- as.matrix(predictors_te)
+
+# Check the structure and class of 'predictors_matrix' again
+str(predictors_matrix_te)
+
+
+# Create the DMatrix object
+dtest <- xgb.DMatrix(data = as.matrix(predictors_te), label = labels_te, nthread = nthread)
+
+
+
+
+# Define the watchlist
+watchlist <- list(train = dtrain, eval = dtest)
+
+# Define the parameters for the XGBoost model
+param <- list(max_depth = 5, 
+              eta = .1, 
+            
+              nthread = nthread,
+              objective = "binary:logistic", 
+              eval_metric = "auc")
+
+#train_data$readmitted_2<-as.factor(train_data$readmitted_2)
+test_data$readmitted_2<-as.factor(test_data$readmitted_2)
+
+
+
+
+# Train the XGBoost model
+bst <- xgb.train(params = param, 
+                 data = dtrain, nrounds = 10,
+                 label = labels, 
+                 watchlist)
+
+# Make predictions on the test set
+pred <- predict(bst, dtest)
+
+# view summary of predictions 
+summary(pred)
+
+# Convert predicted probabilities to binary predictions
+# using < operator so predictions are accurate
+pred <- ifelse(pred < 0.5, 1, 0)
+
+# Create the confusion matrix
+cm <- confusionMatrix(factor(pred), factor(labels_te))
+
+# Print the confusion matrix
+print(cm)
+
+auc <- roc(labels_te, pred)$auc
+print(auc)
+```
+# XGB balanced data
+
+XGB using balanced data
+```{r}
+
+set.seed(123)
+
+train_data<- train_set_balanced2
+test_data <- test_set2
+
+
+## Keep the number of threads to 1 for examples
+nthread <- 1
+
+
+
+predictors <- subset(train_data, select = c("gender", "age", "race", "specialty",  "admission_source_id", "admission_type_id", "discharge", "log_time_hosp", "A1Cresult", "log_num_lab", "log_num_med",  "diabetesMed", "preceding_visits_binary"))
+
+
+predictors_te <-subset(test_data, select = c("gender", "age", "race", "specialty",  "admission_source_id", "admission_type_id", "discharge", "log_time_hosp", "A1Cresult", "log_num_lab", "log_num_med",  "diabetesMed", "preceding_visits_binary"))
+
+
+# Convert label column to numeric vector
+# For training data
+labels <- as.factor(train_data$readmitted_2)
+
+# For test data
+labels_te <- as.factor(test_data$readmitted_2)
+
+labels_te <- as.numeric(as.factor(labels_te)) - 1
+labels <- as.numeric(as.factor(labels)) - 1
+
+
+
+# Convert categorical variables to dummy variables
+predictors <- model.matrix(~., data = predictors)
+
+# Convert predictors data frame to a numeric matrix
+predictors_matrix <- as.matrix(predictors)
+
+# Check the structure and class of 'predictors_matrix' again
+str(predictors_matrix)
+
+# Create the DMatrix object for training data
+dtrain <- xgb.DMatrix(data = predictors_matrix, label = labels, nthread = nthread)
+
+
+
+# Convert categorical variables to dummy variables
+predictors_te <- model.matrix(~., data = predictors_te)
+
+# Convert predictors data frame to a numeric matrix
+predictors_matrix_te <- as.matrix(predictors_te)
+
+# Check the structure and class of 'predictors_matrix' again
+str(predictors_matrix_te)
+
+
+# Create the DMatrix object
+dtest <- xgb.DMatrix(data = as.matrix(predictors_te), label = labels_te, nthread = nthread)
+
+
+
+
+# Define the watchlist
+watchlist <- list(train = dtrain, eval = dtest)
+
+# Define the parameters for the XGBoost model
+param <- list(max_depth = 5, 
+              eta = .1, 
+            
+              nthread = nthread,
+              objective = "binary:logistic", 
+              eval_metric = "auc")
+
+#train_data$readmitted_2<-as.factor(train_data$readmitted_2)
+test_data$readmitted_2<-as.factor(test_data$readmitted_2)
+
+
+
+
+# Train the XGBoost model
+bst <- xgb.train(params = param, 
+                 data = dtrain, nrounds = 10,
+                 label = labels, 
+                 watchlist)
+
+
+
+# Now, try making predictions again
+pred <- predict(bst, dtest)
+
+# view summary of predictions 
+summary(pred)
+
+# Convert predicted probabilities to binary predictions
+# using < operator so predictions are accurate
+pred <- ifelse(pred < 0.5, 1, 0)
+
+# Create the confusion matrix
+cm <- confusionMatrix(factor(pred), factor(labels_te))
+
+# Print the confusion matrix
+print(cm)
+
+auc <- roc(labels_te, pred)$auc
+print(auc)
+```
+
+
+# XGB BL-SMOTE
+XGBoost model using BL-SMOTE data
+
+```{r}
+
+
+
+
+#library(xgboost)
+set.seed(127)
+
+
+# Subset DataFrame to include only required columns
+dummy_set <- train_set2[, c("readmitted_2",
+                            "age",
+                             #race
+                             # gender
+                            "admission_type_id" ,
+                            "admission_source_id" ,
+                            "num_medications" ,
+                            "change", 
+                            "diabetesMed" ,  
+                            "A1Cresult",
+                            "discharge",
+                            "log_time_hosp", 
+                            "log_num_lab",
+                            "preceding_visits_binary",
+                            "log_scores" 
+                              )]
+
+# Identify factor variables
+factor_variables <- sapply(dummy_set, is.factor)
+
+# Use dummy_columns function
+dummy2 <- dummy_columns(
+  dummy_set,
+  select_columns = NULL,
+  remove_first_dummy = TRUE,  # Remove the first dummy variable for each categorical variable
+  remove_most_frequent_dummy = FALSE,
+  ignore_na = FALSE,
+  split = NULL,
+  remove_selected_columns = TRUE,  # Remove original columns after creating dummy variables
+  
+)
+
+# Subset DataFrame to include only required columns
+dummy_set_te <- test_set2[, c("readmitted_2",
+                            "age",
+                             #race
+                             # gender
+                             
+                            "admission_type_id" ,
+                            "admission_source_id" ,
+                            "num_medications" ,
+                            "change", 
+                            "diabetesMed" ,  
+                            "A1Cresult",
+                           "discharge",
+                            
+                            "log_time_hosp", 
+                            "log_num_lab",
+                            "preceding_visits_binary",
+                            "log_scores"
+                              )]
+
+# Identify factor variables
+factor_variables <- sapply(dummy_set_te, is.factor)
+
+# Use dummy_columns function
+dummy_te2 <- dummy_columns(
+  dummy_set_te,
+  select_columns = NULL,
+  remove_first_dummy = TRUE,  # Remove the first dummy variable for each categorical variable
+  remove_most_frequent_dummy = FALSE,
+  ignore_na = FALSE,
+  split = NULL,
+  remove_selected_columns = TRUE,  # Remove original columns after creating dummy variables
+  
+)
+
+names(dummy2)[names(dummy2) == "readmitted_2_1"] <- "readmitted_2"
+
+names(dummy_te2)[names(dummy_te2) == "readmitted_2_1"] <- "readmitted_2"
+
+set.seed(123)
+smote_tuned <- BLSMOTE(X = dummy2, target = dummy2$readmitted_2, K=2,C=10,dupSize=0, method =c("type1","type2"))
+
+
+# Convert the list object to a data frame
+smote_tuned <- as.data.frame(smote_tuned$data)
+table(smote_tuned$readmitted_2)
+
+
+# remove class column
+smote_tuned <- smote_tuned[, !colnames(smote_tuned) %in% c("class")]
+table(smote_tuned$readmitted_2)
+table(dummy_te2$readmitted_2)
+
+
+
+
+# rename for xgboost
+train_data<- smote_tuned
+test_data <- dummy_te2
+test_data$readmitted_2<- as.factor(test_data$readmitted_2)
+
+#train_data$readmitted_2 <- ifelse(train_data$readmitted_2 == 1, 1, 0)
+
+
+# XGB MODEL
+
+## Keep the number of threads to 1 for examples
+nthread <- 1
+
+# print(watchlist) to check consistency among matrices
+# Rename the column 'readmitted_2_1' to 'readmitted_2' in test_data
+names(test_data)[names(test_data) == "readmitted_2_1"] <- "readmitted_2"
+
+
+# subset predictors for train and test data
+predictors <- subset(train_data, select = -readmitted_2)
+predictors_te <- subset(test_data, select = -readmitted_2)
+
+# fix readmitted_2 in predictors
+names(predictors)[names(predictors) == "readmitted_2_1"] <- "readmitted_2"
+
+# (funky stuff happening here with readmitted label _2_1)
+
+# Convert label column to numeric vector
+labels <- train_data$readmitted_2
+labels_te <- test_data$readmitted_2
+
+labels_te <- as.numeric(as.factor(labels_te)) - 1
+labels <- as.numeric(as.factor(labels)) - 1
+
+# Create the DMatrix object
+dtrain <- xgb.DMatrix(data = as.matrix(predictors), label = labels, nthread = nthread)
+
+
+# Create the DMatrix object
+dtest <- xgb.DMatrix(data = as.matrix(predictors_te), label = labels_te, nthread = nthread)
+
+
+
+
+# Define the watchlist
+watchlist <- list(train = dtrain, eval = dtest)
+
+
+# Function to compute scale_pos_weight based on class imbalance
+compute_scale_pos_weight <- function(labels) {
+  # Compute class imbalance ratio
+  imbalance_ratio <- sum(labels == 1) / sum(labels == 0)
+  # Compute scale_pos_weight
+  scale_pos_weight <- imbalance_ratio
+  return(scale_pos_weight)
+}
+
+
+  
+  # Define the parameters for the XGBoost model
+    param <- list(max_depth = 2,
+                  eta = 0.03,
+                  nthread = nthread,
+                  objective = "binary:logistic",
+                  eval_metric = "auc",
+                  scale_pos_weight = compute_scale_pos_weight(labels))
+    
+    
+    
+    # Train the XGBoost model
+    bst <- xgb.train(params = param,
+                     data = dtrain,
+                     nrounds = 10,
+                     label = labels,
+                     watchlist)
+    
+
+# Make predictions on the test set
+pred <- predict(bst, dtest)
+
+
+# Convert predicted probabilities to binary predictions
+pred <- ifelse(pred > 0.5, 1, 0)
+
+# Create the confusion matrix
+cm <- confusionMatrix(factor(pred), factor(labels_te))
+print(cm)
+
+auc <- roc(labels_te, pred)$auc
+print(auc)
+
+
+# the average error
+err <- mean(as.numeric(pred > 0.5) != labels_te)
+print(paste("test-error=", err))
+
+# information extraction
+label = getinfo(dtest, "label")
+pred <- predict(bst, dtest)
+err <- as.numeric(sum(as.integer(pred > 0.5) != label))/length(label)
+print(paste("test-error=", err))
+
+
+
+# view treses from model 
+#xgb.dump(bst, with_stats = TRUE)
+
+# Plot the first tree
+xgb.plot.tree(model = bst, trees = 1:3)
+
+
+# Assuming `bst` is your trained XGBoost model object
+ xgb.importance(model = bst)
+
+
+```
+
+# XGB SMOTE
+XGBoost model using SMOTE data
+
+
+
+```{r}
+
+set.seed(123)
+
+
+# Subset DataFrame to include only required columns
+dummy_set <- train_set2[, c("readmitted_2",
+                            "age",
+                             #race
+                             # gender
+                            "admission_type_id" ,
+                            "admission_source_id" ,
+                            "num_medications" ,
+                            "change", 
+                            "diabetesMed" ,  
+                            "A1Cresult",
+                            "discharge",
+                            "log_time_hosp", 
+                            "log_num_lab",
+                            "preceding_visits_binary",
+                            "log_scores" 
+                              )]
+
+# Identify factor variables
+factor_variables <- sapply(dummy_set, is.factor)
+
+# Use dummy_columns function
+dummy2 <- dummy_columns(
+  dummy_set,
+  select_columns = NULL,
+  remove_first_dummy = TRUE,  # Remove the first dummy variable for each categorical variable
+  remove_most_frequent_dummy = FALSE,
+  ignore_na = FALSE,
+  split = NULL,
+  remove_selected_columns = TRUE,  # Remove original columns after creating dummy variables
+  
+)
+
+# Subset DataFrame to include only required columns
+dummy_set_te <- test_set2[, c("readmitted_2",
+                            "age",
+                             #race
+                             # gender
+                             
+                            "admission_type_id" ,
+                            "admission_source_id" ,
+                            "num_medications" ,
+                            "change", 
+                            "diabetesMed" ,  
+                            "A1Cresult",
+                           "discharge",
+                            
+                            "log_time_hosp", 
+                            "log_num_lab",
+                            "preceding_visits_binary",
+                            "log_scores"
+                              )]
+
+# Identify factor variables
+factor_variables <- sapply(dummy_set_te, is.factor)
+
+# Use dummy_columns function
+dummy_te2 <- dummy_columns(
+  dummy_set_te,
+  select_columns = NULL,
+  remove_first_dummy = TRUE,  # Remove the first dummy variable for each categorical variable
+  remove_most_frequent_dummy = FALSE,
+  ignore_na = FALSE,
+  split = NULL,
+  remove_selected_columns = TRUE,  # Remove original columns after creating dummy variables
+  
+)
+
+names(dummy2)[names(dummy2) == "readmitted_2_1"] <- "readmitted_2"
+
+names(dummy_te2)[names(dummy_te2) == "readmitted_2_1"] <- "readmitted_2"
+
+set.seed(123)
+smote_tuned <- SMOTE(X = dummy2, target = dummy2$readmitted_2, K=2,dup_size=0)
+
+
+# Convert the list object to a data frame
+smote_tuned <- as.data.frame(smote_tuned$data)
+table(smote_tuned$readmitted_2)
+
+
+# remove class column
+smote_tuned <- smote_tuned[, !colnames(smote_tuned) %in% c("class")]
+table(smote_tuned$readmitted_2)
+table(dummy_te2$readmitted_2)
+
+
+
+
+# rename for xgboost
+train_data<- smote_tuned
+test_data <- dummy_te2
+test_data$readmitted_2<- as.factor(test_data$readmitted_2)
+
+#train_data$readmitted_2 <- ifelse(train_data$readmitted_2 == 1, 1, 0)
+
+
+# XGB MODEL
+
+## Keep the number of threads to 1 for examples
+nthread <- 1
+
+# print(watchlist) to check consistency among matrices
+# Rename the column 'readmitted_2_1' to 'readmitted_2' in test_data
+names(test_data)[names(test_data) == "readmitted_2_1"] <- "readmitted_2"
+
+
+# subset predictors for train and test data
+predictors <- subset(train_data, select = -readmitted_2)
+predictors_te <- subset(test_data, select = -readmitted_2)
+
+# fix readmitted_2 in predictors
+names(predictors)[names(predictors) == "readmitted_2_1"] <- "readmitted_2"
+
+# (funky stuff happening here with readmitted label _2_1)
+
+# Convert label column to numeric vector
+labels <- train_data$readmitted_2
+labels_te <- test_data$readmitted_2
+
+labels_te <- as.numeric(as.factor(labels_te)) - 1
+labels <- as.numeric(as.factor(labels)) - 1
+
+# Create the DMatrix object
+dtrain <- xgb.DMatrix(data = as.matrix(predictors), label = labels, nthread = nthread)
+
+
+# Create the DMatrix object
+dtest <- xgb.DMatrix(data = as.matrix(predictors_te), label = labels_te, nthread = nthread)
+
+
+
+
+# Define the watchlist
+watchlist <- list(train = dtrain, eval = dtest)
+
+
+# Function to compute scale_pos_weight based on class imbalance
+compute_scale_pos_weight <- function(labels) {
+  # Compute class imbalance ratio
+  imbalance_ratio <- sum(labels == 1) / sum(labels == 0)
+  # Compute scale_pos_weight
+  scale_pos_weight <- imbalance_ratio
+  return(scale_pos_weight)
+}
+
+
+  
+  # Define the parameters for the XGBoost model
+    param <- list(max_depth = 2,
+                  eta = 0.03,
+                  nthread = nthread,
+                  objective = "binary:logistic",
+                  eval_metric = "auc",
+                  scale_pos_weight = compute_scale_pos_weight(labels))
+    
+    
+    
+    # Train the XGBoost model
+    bst <- xgb.train(params = param,
+                     data = dtrain,
+                     nrounds = 10,
+                     label = labels,
+                     watchlist)
+    
+
+# Make predictions on the test set
+pred <- predict(bst, dtest)
+
+
+# Convert predicted probabilities to binary predictions
+pred <- ifelse(pred > 0.5, 1, 0)
+
+# Create the confusion matrix
+cm <- confusionMatrix(factor(pred), factor(labels_te))
+print(cm)
+
+auc <- roc(labels_te, pred)$auc
+print(auc)
+
+
+# the average error
+err <- mean(as.numeric(pred > 0.5) != labels_te)
+print(paste("test-error=", err))
+
+# information extraction
+label = getinfo(dtest, "label")
+pred <- predict(bst, dtest)
+err <- as.numeric(sum(as.integer(pred > 0.5) != label))/length(label)
+print(paste("test-error=", err))
+
+
+
+# view treses from model 
+#xgb.dump(bst, with_stats = TRUE)
+
+# Plot the first tree
+xgb.plot.tree(model = bst, trees = 1:3)
+
+
+# Assuming `bst` is your trained XGBoost model object
+ xgb.importance(model = bst)
+
+
+```
+
+### xgb tuning
+
+adding the compute scale pos weight increases model performance
+
+```{r}
+set.seed(123)
+
+# Function to compute scale_pos_weight based on class imbalance
+compute_scale_pos_weight <- function(labels) {
+  # Compute class imbalance ratio
+  imbalance_ratio <- sum(labels == 0) / sum(labels == 1)
+  # Compute scale_pos_weight
+  scale_pos_weight <- imbalance_ratio
+  return(scale_pos_weight)
+}
+
+# Define the parameters for the XGBoost model
+  param <- list(max_depth = 2,
+                eta = .001,
+                nthread = nthread,
+                objective = "binary:logistic",
+                eval_metric = "auc",
+                scale_pos_weight = compute_scale_pos_weight(labels))  # Adjusted parameter
+  
+  
+  
+  # Train the XGBoost model
+  bst <- xgb.train(params = param,
+                   data = dtrain,
+                   nrounds = 10,
+                   label = labels,
+                   watchlist)
+# Make predictions on the test set
+pred <- predict(bst, dtest)
+# Convert predicted probabilities to binary predictions
+pred <- ifelse(pred > 0.5, 1, 0)
+
+# Create the confusion matrix
+cm <- confusionMatrix(factor(pred), factor(labels_te))
+
+# Print the confusion matrix
+print(cm)
+
+
+auc <- roc(labels_te, pred)$auc
+print(auc)
+
+# the average error
+err <- mean(as.numeric(pred > 0.5) != labels_te)
+print(paste("test-error=", err))
+
+# information extraction
+label = getinfo(dtest, "label")
+pred <- predict(bst, dtest)
+err <- as.numeric(sum(as.integer(pred > 0.5) != label))/length(label)
+print(paste("test-error=", err))
+
+
+
+# view treses from model 
+xgb.dump(bst, with_stats = TRUE)
+
+# Plot the first tree
+xgb.plot.tree(model = bst, trees = 2)
+
+
+# Area under the curve: 0.5009
+
+```
+
+## xgb tuning 2- best
+
+this model uses eta 0001, maxdepth 20, compute_scale_pos_weight, nrounds
+= 10. Slight improvement to positive predicted class.
+
+```{r}
+
+nthread <- 1
+
+# Define the parameters for the XGBoost model
+  param <- list(max_depth = 2,
+                eta = 0.01,
+                nthread = nthread,
+                objective = "binary:logistic",
+                eval_metric = "auc",
+                scale_pos_weight = compute_scale_pos_weight(labels))
+  
+  
+  
+  # Train the XGBoost model
+  bst <- xgb.train(params = param,
+                   data = dtrain,
+                   nrounds = 10,
+                   label = labels,
+                   watchlist)
+  
+# Make predictions on the test set
+pred <- predict(bst, dtest)
+# Convert predicted probabilities to binary predictions
+pred <- ifelse(pred > 0.5, 1, 0)
+
+# Create the confusion matrix
+cm <- confusionMatrix(factor(pred), factor(labels_te))
+cm
+
+auc <- roc(labels_te, pred)$auc
+print(auc)
+
+# the average error
+err <- mean(as.numeric(pred >0.5) != labels_te)
+print(paste("test-error=", err))
+
+# information extraction
+label = getinfo(dtest, "label")
+pred <- predict(bst, dtest)
+err <- as.numeric(sum(as.integer(pred > 0.5) != label))/length(label)
+print(paste("test-error=", err))
+
+
+
+# view treses from model 
+xgb.dump(bst, with_stats = TRUE)
+
+# Plot the first tree
+xgb.plot.tree(model = bst, trees = 1:3)
+
+# view importance scores
+xgb.importance(model = bst)
+
+
+
+
+
+
+
+```
+
+## xgb tuning 3
+
+eta is 0.003, maxdepth is 2, nrounds is 100,
+
+```{r}
+
+set.seed(123)
+
+# Define the parameters for the XGBoost model
+  param <- list(max_depth = 3,
+                eta = 0.001,
+                nthread = nthread,
+                objective = "binary:logistic",
+                eval_metric = "auc",
+                scale_pos_weight = compute_scale_pos_weight(labels))
+  
+  # try subsampling wih subsample = 0.8 
+  
+  # Train the XGBoost model
+  bst <- xgb.train(params = param,
+                   data = dtrain,
+                   nrounds = 100,
+                   label = labels,
+                   watchlist)
+  
+# Make predictions on the test set
+pred <- predict(bst, dtest)
+# Convert predicted probabilities to binary predictions
+pred <- ifelse(pred < 0.5, 1, 0)
+
+# Create the confusion matrix
+cm <- confusionMatrix(data = factor(pred), reference= factor(labels_te))
+
+# Print the confusion matrix
+print(cm)
+
+auc <- roc(labels_te, pred)$auc
+print(auc)
+
+
+#  feature importance scores
+xgb.importance(model = bst)
+
+
+
+```
+

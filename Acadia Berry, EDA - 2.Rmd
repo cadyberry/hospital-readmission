@@ -1,0 +1,2142 @@
+---
+title: "Capstone project data prep"
+author: "Acadia Berry"
+date: "2024-02-15"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+# Library packages
+
+```{r}
+library(ggplot2)
+library(psych)
+library(dplyr)
+library(caret)
+library(tidyverse)
+library(broom)
+library(psych)
+library(car)
+library(plyr)
+library(rpart)
+library(pROC)
+library(forcats)
+
+
+```
+
+Run the "Data Prep" file first project file
+
+# Import data
+
+```{r}
+
+# get data sets
+
+# df_2 is cleaned data
+df_2<- read.csv("df_2")
+df_2 <- df_2 %>%
+  mutate_if(is.character, as.factor)
+
+# train set is from df_2
+dfC<-read.csv("dfC")
+dfC <- dfC %>%
+  mutate_if(is.character, as.factor)
+table(dfC$readmitted)
+```
+
+# Test and Training sets
+
+```{r}
+
+# revalue readmitted
+table(train_set$readmitted)
+
+# Get indices of readmitted = 1
+readmitted_1_indices <- which(train_set$readmitted == 1)
+
+# Randomly sample with replacement from readmitted = 1 to match the count of readmitted = 0
+oversampled_indices <- sample(readmitted_1_indices, sum(train_set$readmitted == 0), replace = TRUE)
+
+# Combine indices of both classes
+all_indices <- c(which(train_set$readmitted == 0), oversampled_indices)
+
+# Create the balanced dataset
+train_set_balanced <- train_set[all_indices, ]
+
+table(train_set_balanced$readmitted)
+#    0     1 
+#50955 50955
+
+```
+
+# Theme
+
+```{r}
+
+# Define a custom color palette with professional colors
+custom_colors <- c("#0072B2", "#009E73", "#F55E00", "#CC79A7", "#F0E442", "#E69F00", "#F5B4E9", "#A5B4E9","#15BE37","#241571", "#FFC300", "#DAF7A6", "#AAF7A6", "#C9B4E9")
+
+
+
+# Set a global theme for ggplot2 with a professional look
+custom_theme <- theme_minimal() +
+  theme(
+    text = element_text(size = 12),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10),
+    panel.background = element_rect(fill = "white"),  # Set panel background color to white
+    plot.background = element_rect(fill = "white"),   # Set plot background color to white
+    panel.grid.major = element_line(color = "gray"),  # Set major grid line color to gray
+    panel.grid.minor = element_line(color = "lightgray")  # Set minor grid line color to light gray
+    # Add any other custom theme settings as needed
+  )
+
+# Set the global theme
+theme_set(custom_theme)
+
+```
+
+# Correlation plot
+
+```{r}
+ 
+# Assuming dfC is your data frame
+numeric_columns <- c( "time_in_hospital", "num_lab_procedures", "num_medications", "num_procedures", "number_outpatient", "number_inpatient", "number_emergency", "readmitted_2")
+
+
+
+pairs.panels(dfC[, numeric_columns], 
+             hist.col="#0072B2", 
+             show.points=TRUE, 
+             stars=TRUE, 
+             gap=0.05,alpha = -0.5,
+             ellipses=FALSE, 
+             scale=FALSE,
+             jiggle=TRUE,
+             factor=2,
+             pch=".", 
+             main="Correlation Plot", 
+             col="#F0E442", 
+             font=2)
+
+
+
+```
+
+```{r}
+# Look at correlations between numeric features
+num <- sapply(dfC, FUN = is.numeric)  # identify numeric columns
+(corx <- cor(dfC[, num], use = "pairwise.complete.obs"))  # simple correlation matrix
+```
+
+# Exploring variable distributions
+
+## Readmitted
+
+```{r}
+dfC$readmitted_2<-as.factor(dfC$readmitted_2)
+dfC$readmit<-as.factor(dfC$readmit)
+
+# original distribution of readmitted
+ggplot(df, aes(x = readmit, fill = readmit)) +
+  geom_bar() +
+  labs(title = "Bar plot for readmit",
+       x = "Reamit", y = "Frequency") +
+  scale_fill_manual(values = custom_colors)
+
+# readmitted as binary from dfC
+dfC$readmit<-as.factor(dfC$readmit)
+ggplot(dfC, aes(x = readmit, fill = readmit)) +
+  geom_bar() +
+  labs(title = "Bar plot for readmit",
+       x = "Reamit", y = "Frequency") +
+  scale_fill_manual(values = custom_colors)  # Set custom bar colors
+
+```
+
+## Age
+
+```{r}
+
+
+# barplot of age (categorical)
+ggplot(dfC, aes(x = age, fill = age)) +
+  geom_bar() +
+  labs(title = "Bar Chart of age",
+       x = "age", y = "Frequency") +
+  scale_fill_manual(values = custom_colors) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+
+# age_2
+ggplot(dfC, aes(x = age_2)) +
+  geom_histogram(fill = custom_colors[2], color = "black", binwidth = 10) +
+  labs(title = "Histogram of Age",
+       x = "Age", y = "Frequency") +
+  custom_theme
+
+summary(dfC$age_2)
+
+
+```
+
+## Race
+
+```{r}
+# Create a bar plot for the race variable with custom colors
+ggplot(dfC, aes(x = race, fill = race)) +
+  geom_bar() +
+  labs(title = "Bar plot for Race",
+       x = "Race", y = "Frequency") +
+  scale_fill_manual(values = custom_colors) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) # Set custom bar colors
+
+
+```
+
+## Gender
+
+```{r}
+ggplot(dfC, aes(x = gender, fill = gender)) +
+  geom_bar() +
+  labs(title = "Bar chart of Gender",
+       x = "Gender", y = "Frequency") +
+  scale_fill_manual(values = custom_colors[c(5,3)]) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) # Set custom bar colors
+```
+
+## Admission type ID
+
+```{r}
+
+
+
+ggplot(dfC, aes(x = fct_infreq(admission_type_id), fill = admission_type_id)) +
+  geom_bar() +
+  labs(title = "Bar Chart of Admission Type ID",
+       x = "Admission Type ID", y = "Frequency") +
+  scale_fill_manual(values = custom_colors) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+```
+
+try assigning weights where elective is 1.2 missing is 1 urgent is 1.5
+emergency is 1.8
+
+## Admission source ID
+
+```{r}
+
+
+ggplot(dfC, aes(x = fct_infreq(admission_source_id), fill = admission_source_id)) +
+  geom_bar() +
+  labs(title = "Bar plot for Admission Source ID",
+       x = "Admission Source ID", y = "Frequency") +
+  scale_fill_manual(values = custom_colors) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+```
+
+## Medical specialty
+
+```{r}
+# Create a bar plot for the specialty variable
+
+ggplot(dfC, aes(x = fct_infreq(specialty), fill = specialty)) +
+  geom_bar() +
+  labs(title = "Bar Chart of Medical Specialty",
+       x = "Medical Specialty", y = "Frequency") +
+  scale_fill_manual(values = custom_colors) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+## HbA1c results
+
+```{r}
+
+dfC <- dfC %>%
+  mutate(A1Cresult = reorder(A1Cresult, -table(A1Cresult)[A1Cresult]))
+
+
+ggplot(dfC, aes(x = A1Cresult, fill = A1Cresult)) +
+  geom_bar() +
+  labs(title = "Bar chart of HbA1c result",
+       x = "HbA1C result", y = "Frequency") +
+  scale_fill_manual(values = custom_colors)
+
+summary(dfC$A1Cresult)
+
+```
+
+## Change in medication
+
+```{r}
+ggplot(dfC, aes(x = change, fill = change)) +
+  geom_bar() +
+  labs(title = "Bar plot for change",
+       x = "change", y = "Frequency") +
+  scale_fill_manual(values = custom_colors[c(2,4)]) 
+```
+
+## Diabetes medication
+
+```{r}
+
+ggplot(dfC, aes(x = diabetesMed, fill = diabetesMed)) +
+  geom_bar() +
+  labs(title = "Bar plot for diabetesMed",
+       x = "diabetesMed", y = "Frequency") +
+  scale_fill_manual(values = custom_colors[c(4,5)]) 
+
+
+```
+
+## Discharge disposition
+
+```{r}
+
+
+dfC <- dfC %>%
+  mutate(discharge_disposition_id = reorder(discharge_disposition_id, -table(discharge_disposition_id)[discharge_disposition_id]))
+
+ggplot(dfC, aes(x = discharge_disposition_id, fill = discharge_disposition_id)) +
+  geom_bar() +
+  labs(title = "Bar Chart of Discharge Disposition ID",
+       x = "Discharge Disposition ID", y = "Frequency") +
+  scale_fill_manual(values = custom_colors) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+ggplot(dfC, aes(x = discharge, fill = discharge)) +
+  geom_bar() +
+  labs(title = "Bar Chart of Discharge Disposition",
+       x = "Discharge", y = "Frequency") +
+  scale_fill_manual(values = custom_colors[c(2,7)]) 
+
+
+
+discharge_counts <- table(df$discharge_disposition_id)
+
+# Calculate the proportions by dividing the counts by the total number of observations
+discharge_proportions <- discharge_counts / sum(discharge_counts)
+
+# Print the proportions
+print(discharge_proportions)
+
+```
+
+## Medication type
+
+```{r}
+
+
+dfC <- dfC %>%
+  mutate(medication_type = reorder(medication_type, -table(medication_type)[medication_type]))
+
+ggplot(dfC, aes(x = medication_type, fill = medication_type)) +
+  geom_bar() +
+  labs(title = "Bar Chart of medication_type",
+       x = "medication_type", y = "Frequency") +
+  scale_fill_manual(values = custom_colors) 
+
+
+```
+
+## HbA1c by readmitted
+
+```{r}
+
+# Create a stacked bar chart to explore the relationship between readmitted and A1Cresult
+ggplot(dfC, aes(x = readmitted_2, fill = A1Cresult)) +
+  geom_bar(position = "fill") +  # Normalize the bars
+  geom_text(
+    aes(label = scales::percent(..count../tapply(..count.., ..x.., sum)[..x..])),
+    stat = "count",
+    position = position_fill(vjust = 0.5),
+    size = 5
+  ) +  # Add text labels for proportions
+  labs(
+    title = "A1Cresult Distribution by Readmission (Normalized)",
+    x = "Readmitted",
+    y = "Proportion"
+  ) +
+  custom_theme +  # Apply your custom theme
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +  # Rotate x-axis labels for better readability
+  scale_fill_manual(values = custom_colors)
+
+
+```
+
+## max_glu_serum
+
+```{r}
+
+dfC <- dfC %>%
+  mutate(max_glu_serum = reorder(max_glu_serum, -table(max_glu_serum)[max_glu_serum]))
+
+# Create a bar plot for the medication_type variable
+ggplot(dfC, aes(x = max_glu_serum)) +
+  geom_bar(fill = custom_colors[1]) +
+  labs(title = "Bar plot for Max Glu Serum",
+       x = "Max Glu Serum", y = "Frequency") +
+  custom_theme
+```
+
+## Number of lab procedures
+
+```{r}
+# Create a histogram for the num_lab_procedures variable with custom theme
+ggplot(dfC, aes(x = num_lab_procedures)) +
+  geom_histogram(fill = custom_colors[2], color = "black", bins = 132) +
+  labs(title = "Histogram of Number of Lab Procedures",
+       x = "Number of Lab Procedures", y = "Frequency") +
+  custom_theme
+
+
+# square root transformation
+ggplot(dfC, aes(x = sqrt_num_lab)) +
+  geom_histogram(fill = custom_colors[4], color = "black", bins = 132) +
+  labs(title = "Histogram of Sqrt of Number of Lab Procedures",
+       x = "Sqrt of Lab Procedures", y = "Frequency") +
+  custom_theme
+
+
+summary(dfC$boxcox_num_lab_procedures)
+# box-cox transformation
+ggplot(dfC, aes(x = boxcox_num_lab_procedures)) +
+  geom_histogram(fill = custom_colors[5], color = "black", bins = 132) +
+  labs(title = "Histogram of Box-Cox transformed Number of Lab Procedures",
+       x = "Box-Cox transformed Lab Procedures", y = "Frequency") +
+  custom_theme
+
+
+
+
+```
+
+```{r}
+
+```
+
+## Time in hospital
+
+```{r}
+# Create a histogram for the time in hospital variable
+ggplot(dfC, aes(x = time_in_hospital)) +
+  geom_histogram(fill = custom_colors[3], color = "black", bins = 14) +
+  labs(title = "Histogram of Time in Hospital",
+       x = "Time in Hospital (days)", y = "Frequency") +
+  custom_theme
+table(dfC$time_in_hospital)
+summary(dfC$time_in_hospital)
+
+
+# log transformed 
+ggplot(dfC, aes(x = log_time_hosp)) +
+  geom_histogram(fill = custom_colors[3], color = "black", bins = 10, binwidth=0.25) +
+  labs(title = "Histogram of Log ofTime in Hospital",
+       x = "Log of Time in Hospital (days)", y = "Frequency") +
+  custom_theme
+table(dfC$log_time_hosp)
+summary(dfC$log_time_hosp)
+```
+
+### two-sample t test for CI: *time in hospital* and *readmitted*
+
+```{r}
+# partition data 
+readmitted.false <- subset(dfC, dfC$readmitted_2 == "1")
+readmitted.true <- subset(dfC, dfC$readmitted_2 == "0")
+
+# run the test
+ t.test(readmitted.false$time_in_hospital, readmitted.true$time_in_hospital)
+
+```
+
+The Welch Two Sample t-test compares the mean time spent in the hospital
+between two groups: those who were not readmitted (readmitted.false) and
+those who were readmitted (readmitted.true).
+
+The test statistic (t) is 16.124, with a degrees of freedom (df) of
+approximately 7358.7. The p-value is very small, less than 2.2e-16,
+indicating strong evidence against the null hypothesis.
+
+The alternative hypothesis suggests that the true difference in means
+between the two groups is not equal to 0, implying that there is a
+statistically significant difference in the mean time spent in the
+hospital between the two groups.
+
+The 95% confidence interval for the difference in means ranges from
+0.6105813 to 0.7795887. This means that we are 95% confident that the
+true difference in mean time spent in the hospital between the two
+groups falls within this interval.
+
+The sample estimates indicate that the mean time spent in the hospital
+for those not readmitted (mean of x) is approximately 4.842 days, while
+the mean time for those readmitted (mean of y) is approximately 4.147
+days.
+
+```{r}
+
+# Perform Mann–Whitney U Test
+wilcox_test_result <- wilcox.test(time_in_hospital ~ readmitted_2, data = dfC)
+
+# Print the results
+print(wilcox_test_result)
+
+```
+
+The null hypothesis states that the difference in medians between
+readmitted and non-readmitted patients is equal to 0. The alternative
+hypothesis states that the difference in medians between readmitted and
+non-readmitted patients is not equal to 0.
+
+Since the p-value is extremely small (P \< 0.001), we reject the null
+hypothesis in favor of the alternative hypothesis and conclude there is
+a statistically significant difference in the average length of patient
+stays between readmitted and non-readmitted patients.
+
+## Number of lab procedures
+
+```{r}
+
+ggplot(dfC, aes(x = num_lab_procedures)) +
+  geom_histogram(fill = custom_colors[1], color = "black", bins = 132) +
+  labs(title = "Histogram of Number of Lab Procedures",
+       x = "Number of Lab Procedures", y = "Frequency") +
+  custom_theme
+
+summary(dfC$num_lab_procedures)
+# Perform Mann–Whitney U Test
+wilcox_test_result <- wilcox.test(num_lab_procedures ~ readmitted_2, data = dfC)
+print(wilcox_test_result)
+
+# standardized lab procedures
+ggplot(dfC, aes(x = standardized_num_lab)) +
+  geom_histogram(fill = custom_colors[1], color = "black", bins = 132, binwidth=0.25) +
+  labs(title = "Histogram of Standardized of Number of Lab Procedures",
+       x = "Lab Procedures (standardized)", y = "Frequency") +
+  custom_theme
+
+# log of lab procedures
+ggplot(dfC, aes(x = log_num_lab)) +
+  geom_histogram(fill = custom_colors[1], color = "black", bins = 132, binwidth=0.25) +
+  labs(title = "Histogram of Standardized of Number of Lab Procedures",
+       x = "Lab Procedures (standardized)", y = "Frequency") +
+  custom_theme
+
+summary(dfC$log_num_lab)
+
+# Perform Mann–Whitney U Test
+wilcox_test_result <- wilcox.test(log_num_lab ~ readmitted_2, data = dfC)
+print(wilcox_test_result)
+
+
+
+# standardized and box-cox transformation
+ggplot(dfC, aes(x = standardized_bc_num_lab)) +
+  geom_histogram(fill = custom_colors[1], color = "black", bins = 132, binwidth=0.25) +
+  labs(title = "Histogram of Standardized of Number of Lab Procedures",
+       x = "Lab Procedures (standardized)", y = "Frequency") +
+  custom_theme
+
+
+```
+
+## Number of medications
+
+```{r}
+
+ggplot(dfC, aes(x = num_medications)) +
+  geom_histogram(fill = custom_colors[2], color = "black", bins = 81) +
+  labs(title = "Histogram of Number Medications",
+       x = "Number of Medications", y = "Frequency") +
+  custom_theme
+
+summary(dfC$num_medications)
+
+wilcox_test_result <- wilcox.test(num_medications ~ readmitted_2, data = dfC)
+print(wilcox_test_result)
+
+
+# log of num medications
+ggplot(dfC, aes(x = log_num_med)) +
+  geom_histogram(fill = custom_colors[2], color = "black", bins = 81, binwidth=0.25) +
+  labs(title = "Histogram of Log of Number Medications",
+       x = "Log of Num Medications", y = "Frequency") +
+  custom_theme
+
+summary(dfC$log_num_med)
+
+wilcox_test_result <- wilcox.test(log_num_med ~ readmitted_2, data = dfC)
+print(wilcox_test_result)
+```
+
+## Number of outpatient visits
+
+```{r}
+
+ggplot(dfC, aes(x = number_outpatient)) +
+  geom_histogram(fill = custom_colors[2], color = "black", bins = 30) +
+  labs(title = "Histogram of Number of Outpatient Visits",
+       x = "Number of Outpatient", y = "Frequency") +
+  custom_theme
+
+summary(dfC$number_outpatient)
+
+wilcox_test_result <- wilcox.test(number_outpatient ~ readmitted_2, data = dfC)
+print(wilcox_test_result)
+
+```
+
+## Number of inpatient visits
+
+```{r}
+
+
+ggplot(df_2, aes(x = number_inpatient)) +
+  geom_histogram(fill = custom_colors[3], color = "black", bins = 30) +
+  labs(title = "Histogram of Inpatient Visits",
+       x = "Number of inpatient", y = "Frequency") +
+  custom_theme
+
+
+summary(dfC$number_inpatient)
+
+wilcox_test_result <- wilcox.test(number_inpatient ~ readmitted_2, data = dfC)
+
+print(wilcox_test_result)
+
+```
+
+## Number of emergency visits
+
+```{r}
+
+ggplot(df_2, aes(x = number_emergency)) +
+  geom_histogram(fill = custom_colors[3], color = "black", bins = 30) +
+  labs(title = "Histogram of Number of ER Visits",
+       x = "Number of ER Visits", y = "Frequency") +
+  custom_theme
+
+summary(dfC$number_emergency)
+
+wilcox_test_result <- wilcox.test(number_emergency ~ readmitted_2, data = dfC)
+print(wilcox_test_result)
+
+```
+
+## Number of diagnoses
+
+```{r}
+
+ggplot(dfC, aes(x = number_diagnoses)) +
+  geom_histogram(fill = custom_colors[6], color = "black", binwidth = 1) +
+  labs(title = "Histogram of Number of Diagnoses",
+       x = "Number of Diagnoses", y = "Frequency") +
+  custom_theme
+
+
+summary(dfC$number_diagnoses)
+
+wilcox_test_result <- wilcox.test(number_diagnoses ~ readmitted_2, data = dfC)
+print(wilcox_test_result)
+
+```
+
+# Assessing bivariate relationships
+
+## Number of lab procedures & readmitted
+
+```{r}
+
+# Create a boxplot for num_lab_procedures against readmitted
+ggplot(dfC, aes(x = factor(readmitted), y = num_lab_procedures)) +
+  geom_boxplot(fill = custom_colors[2], color = "black") +
+  labs(title = "Distribution of Number of Lab Procedures by Readmission Status",
+       x = "Readmitted", y = "Number of Lab Procedures") +
+  custom_theme
+
+# Perform Wilcoxon rank-sum test
+wilcox_test_result <- wilcox.test(num_lab_procedures ~ readmitted, data = df_2)
+
+# Print the result
+print(wilcox_test_result)
+
+#The Wilcoxon rank-sum test (Mann-Whitney U test) with continuity correction yields a highly significant p-value (< 2.2e-16), indicating strong evidence against the null hypothesis
+
+
+
+
+# histogram of num lab procedures and readmitted overlay
+
+ggplot(dfC, aes(x = num_lab_procedures, fill = factor(readmitted))) +
+  geom_histogram(binwidth = 5, position = "stack", color = "black") +
+  scale_x_continuous("Number of Lab Procedures") +
+  scale_y_continuous("Percent") +
+  guides(fill = guide_legend(title = "Readmission")) +
+  scale_fill_manual(values = c("#AAF7A6", "#C9B4E9"))+
+  labs(title = "Histogram of Number of Lab Procedures by Readmission Status")
+
+
+
+
+
+# normalized histogram of num lab procedures and readmitted
+
+ggplot(dfC, aes(x = num_lab_procedures, fill = factor(readmitted))) +
+  geom_histogram(binwidth = 5, position = "fill", color = "black") +
+  scale_x_continuous("Number of Lab Procedures") +
+  scale_y_continuous("Percent") +
+  guides(fill = guide_legend(title = "Readmission")) +
+  scale_fill_manual(values = c("#AAF7A6", "#C9B4E9")) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Histogram of Number of Lab Procedures by Readmission Status")
+
+
+```
+
+## Number of medications & readmitted
+
+```{r}
+
+# Create a boxplot for num_lab_procedures against readmitted
+ggplot(dfC, aes(x = factor(readmitted), y = num_medications)) +
+  geom_boxplot(fill = custom_colors[3], color = "black") +
+  labs(title = "Distribution of Number of Medications by Readmission Status",
+       x = "Readmitted", y = "Number of medications") +
+  custom_theme
+
+# Perform Wilcoxon rank-sum test
+wilcox_test_result <- wilcox.test(num_medications ~ readmitted, data = df_2)
+
+# Print the result
+print(wilcox_test_result)
+
+#The Wilcoxon rank-sum test (Mann-Whitney U test) with continuity correction yields a highly significant p-value (< 2.2e-16), indicating strong evidence against the null hypothesis
+
+
+```
+
+## Number of medical procedures & readmitted
+
+```{r}
+
+# Create a boxplot for num_lab_procedures against readmitted
+ggplot(dfC, aes(x = factor(readmitted), y = num_procedures)) +
+  geom_boxplot(fill = custom_colors[2], color = "black") +
+  labs(title = "Distribution of Number of  Procedures by Readmission Status",
+       x = "Readmitted", y = "Number of Procedures") +
+  custom_theme
+
+# Perform Wilcoxon rank-sum test
+wilcox_test_result <- wilcox.test(num_procedures ~ readmitted, data = df_2)
+
+# Print the result
+print(wilcox_test_result)
+
+#The Wilcoxon rank-sum test (Mann-Whitney U test) with continuity correction yields a low  p-value (p-value = 0.532), indicating no evidence against the null hypothesis
+
+```
+
+## Change in medication & readmitted
+
+```{r}
+
+dfC$change<- as.factor(dfC$change)
+
+# Create a contingency table
+contingency_table <- table(dfC$change, dfC$readmitted)
+
+# Print the contingency table
+print(contingency_table)
+
+# Perform chi-square test of independence
+chi_square_test <- chisq.test(contingency_table)
+print(chi_square_test)
+
+# Calculate phi coefficient (correlation coefficient)
+phi_coefficient <- sqrt(chi_square_test$statistic / sum(contingency_table))
+print(phi_coefficient)
+```
+
+The chi-square test of independence tests whether there is a significant
+association between the variables. The test statistic is 12.373 with 1
+degree of freedom, and the p-value is 4.721e-08. With such a low
+p-value, we reject the null hypothesis that there is no association
+between *change* and *readmitted*.
+
+Instead, we conclude that there is a significant association between
+these variables. The phi coefficient measures the strength of
+association between two binary variables. It ranges from 0 to 1, where 0
+indicates no association and 1 indicates a perfect association. In this
+case, the phi coefficient is approximately 0.085, indicating a weak
+positive association between *change* and *readmitted*.
+
+## Number of lab procedures & readmitted
+
+```{r}
+
+ggplot(dfC, aes(x = num_lab_procedures, fill = readmitted)) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Density Plot of Number of Lab Procedures by Readmission Status",
+       x = "Number of Lab Procedures", y = "Density") +
+  scale_fill_manual(values = c("#CC79A7", "#0072B2")) +
+  custom_theme
+
+
+ggplot(dfC, aes(x = log_num_lab, fill = readmitted)) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Density Plot of Number of Lab Procedures by Readmission Status",
+       x = "Number of Lab Procedures", y = "Density") +
+  scale_fill_manual(values = c("#CC79A7", "#0072B2")) +
+  custom_theme
+
+
+
+
+```
+
+## HbA1c result & readmitted
+
+```{r}
+
+# Create a contingency table
+contingency_table <- table(dfC$A1Cresult, dfC$readmitted)
+
+# Print the contingency table
+print(contingency_table)
+
+# Perform chi-square test of independence
+chi_square_test <- chisq.test(contingency_table)
+print(chi_square_test)
+
+# Calculate phi coefficient (correlation coefficient)
+phi_coefficient <- sqrt(chi_square_test$statistic / sum(contingency_table))
+print(phi_coefficient)
+
+
+
+# Create a bar plot for readmitted and A1Cresult
+ggplot(dfC, aes(x = A1Cresult, fill = readmitted)) +
+  geom_bar(position = "dodge", color = "black") +
+  labs(title = "Bar plot for A1Cresult and Readmitted",
+       x = "A1Cresult", y = "Proportion",
+       fill = "Readmitted") +
+  scale_fill_manual(values = custom_colors[2:3]) +  # Use custom colors for fill
+  custom_theme
+
+# Create a bar plot for readmitted and A1Cresult
+ggplot(dfC, aes(x = A1Cresult, fill = readmitted)) +
+  geom_bar(position = "fill", color = "black") +
+  labs(title = "Bar plot for A1Cresult and Readmitted",
+       x = "A1Cresult", y = "Proportion",
+       fill = "Readmitted") +
+  scale_fill_manual(values = custom_colors[2:3]) +  # Use custom colors for fill
+  custom_theme
+
+# contingency table of HbA1c levels
+proportions_table <- table(dfC$A1Cresult)
+proportions_table <- prop.table(proportions_table)
+print(proportions_table)
+
+
+# contingency table of HbA1c and readmission
+proportions_table <- table(dfC$A1Cresult, dfC$readmitted)
+proportions_table <- prop.table(proportions_table, margin = 1)
+colnames(proportions_table) <- c("Not Readmitted", "Readmitted")
+proportions_table
+
+
+
+# Create a contingency table of HbA1c and readmission
+counts_table <- table(dfC$A1Cresult, dfC$readmitted_2)
+
+# Perform Pearson's chi-squared test
+chisq_test_result <- chisq.test(counts_table)
+
+# Print the chi-squared test result
+print(chisq_test_result)
+
+
+# a1c result against scores
+ggplot(dfC, aes(x = A1Cresult, y = scores)) +
+  geom_boxplot(fill = custom_colors[2], color = custom_colors[1]) +
+  labs(title = "Box plot of Scores by HbA1c Result",
+       x = "HbA1c Result", y = "Scores")
+
+
+# Perform ANOVA
+anova_result <- aov(scores ~ A1Cresult, data = dfC)
+summary(anova_result)
+
+
+#kw test
+kruskal_test_result <- kruskal.test(scores ~ A1Cresult, data = dfC)
+print(kruskal_test_result)
+```
+
+Sure, let's break down each statistical test and its respective results:
+
+The Kruskal-Wallis test assesses whether the medians of a continuous
+variable (scores) differ across different groups (A1Cresult categories).
+The Kruskal-Wallis chi-squared value is 40.108 with 3 degrees of
+freedom, yielding a p-value of 1.011e-08, indicating a statistically
+significant difference in scores across A1Cresult categories. This
+suggests that A1Cresult may have a significant impact on the observed
+scores among the diabetic patient population.
+
+Pearson's chi-squared test evaluates the association between two
+categorical variables (A1Cresult and readmitted) in a contingency table
+format. The chi-squared statistic is 9.1599 with 3 degrees of freedom,
+resulting in a p-value of 0.02724. This indicates a statistically
+significant association between A1Cresult and readmission status among
+diabetic patients.
+
+Tukey's HSD test is used to identify pairwise differences in means
+between A1Cresult categories while controlling for multiple comparisons.
+Significant differences are observed between certain pairs of A1Cresult
+categories. For instance, \>8 and Norm categories compared to None show
+statistically significant differences in scores, as indicated by their
+respective confidence intervals and adjusted p-values.
+
+These tests collectively indicate a strong association between A1C
+results and readmission outcomes within the data.
+
+## Time in hospital & readmitted
+
+```{r}
+
+ggplot() + 
+  geom_bar(data = dfC, 
+           aes(x = factor(time_in_hospital), 
+               fill = factor(readmitted)), 
+           position= "fill") + # change to stack for regular
+  scale_x_discrete("Days in Hospital ") +
+  scale_y_continuous("Frequency") +
+  guides (fill= guide_legend(title = "Readmitted")) + 
+  scale_fill_manual(values = c("#CC79A7", "#0072B2"))+
+  labs(
+    title = "Norm. Distribution of Time in Hospital by Readmission",
+     )
+```
+
+```{r}
+
+# Create a boxplot for time in hospital against readmitted
+ggplot(dfC, aes(x = factor(readmitted), y = time_in_hospital)) +
+  geom_boxplot(fill = custom_colors[1], color = "black") +
+  labs(title = "Distribution of Time in Hospital",
+       x = "Readmitted", y = "Time in Hospital") +
+  custom_theme
+
+# Perform Wilcoxon rank-sum test
+wilcox_test_result <- wilcox.test(time_in_hospital ~ readmitted, data = dfC)
+
+# Print the result
+print(wilcox_test_result)
+
+
+```
+
+The Wilcoxon rank sum test compares the distribution of *time in
+hospital* between two groups defined by the *readmitted*.
+
+The test statistic (W) is extremely large, indicating a substantial
+difference in the ranks between the two groups. The p-value is reported
+as \< 2.2e-16. This indicates strong evidence against the null
+hypothesis, suggesting that there is a significant difference in the
+distribution of *time in hospital* between the groups.
+
+## Number of outpatient vists & readmitted
+
+```{r}
+
+ggplot(data = dfC, aes(x = number_outpatient, fill = factor(readmitted))) + 
+  geom_bar(position = "fill") + 
+  scale_x_discrete("Number of Outpatient Visits") + 
+  scale_y_continuous("Frequency") + 
+  guides(fill = guide_legend(title = "Readmitted")) + 
+  scale_fill_manual(values = c("#CC79A7", "#0072B2")) + 
+  labs(title = "Normalized Distribution of Number of Outpatient Visits by Readmission")
+
+# Perform Wilcoxon rank-sum test
+wilcox_test_result <- wilcox.test(number_outpatient ~ readmitted, data = dfC)
+
+# Print the result
+print(wilcox_test_result)
+
+
+```
+
+The Wilcoxon rank sum test was conducted to compare the distribution of
+the number of outpatient visits between the two groups defined by the
+readmission status.
+
+Test statistic (W): 163727361 p-value: 0.0001581 Since the p-value
+(0.0001581) is less than the significance level (typically 0.05), we
+reject the null hypothesis. Therefore, we conclude that there is
+evidence to suggest that the distribution of the number of outpatient
+visits differs significantly between the two groups based on readmission
+status.
+
+## Number of inpatient visits & readmitted
+
+```{r}
+ggplot(data = dfC, aes(x = number_inpatient, fill = factor(readmitted))) + 
+  geom_bar(position = "fill") + 
+  scale_x_discrete("Number of Outpatient Visits") + 
+  scale_y_continuous("Frequency") + 
+  guides(fill = guide_legend(title = "Readmitted")) + 
+  scale_fill_manual(values = c("#CC79A7", "#0072B2")) + 
+  labs(title = "Normalized Distribution of Number of Outpatient Visits by Readmission")
+
+# Perform Wilcoxon rank-sum test
+wilcox_test_result <- wilcox.test(number_inpatient ~ readmitted, data = dfC)
+print(wilcox_test_result)
+
+```
+
+The Wilcoxon rank sum test was conducted to compare the distribution of
+the number of inpatient visits between the two groups defined by the
+readmission status. The p-value is extremely small, indicating strong
+evidence against the null hypothesis. Therefore, we conclude that there
+is a significant difference in the distribution of the number of
+inpatient visits between the two groups based on readmission status.
+
+## Number of ER visits & readmitted
+
+```{r}
+ggplot(data = dfC, aes(x = number_emergency, fill = factor(readmitted))) + 
+  geom_bar(position = "fill") + 
+  scale_x_discrete("Number of ER Visits") + 
+  scale_y_continuous("Frequency") + 
+  guides(fill = guide_legend(title = "Readmitted")) + 
+  scale_fill_manual(values = c("#CC79A7", "#0072B2")) + 
+  labs(title = "Normalized ER Visits by Readmission")
+
+# Perform Wilcoxon rank-sum test
+wilcox_test_result <- wilcox.test(number_emergency ~ readmitted, data = dfC)
+
+# Print the result
+print(wilcox_test_result)
+
+```
+
+\
+The Wilcoxon rank sum test was conducted to assess whether there is a
+significant difference in the number of emergency visits between
+patients who were readmitted and those who were not.
+
+The test yielded a Wilcoxon W statistic of 122912614 and an extremely
+low p-value (\< 2.2e-16), indicating a highly significant difference.
+Therefore, the null hypothesis, which suggests that there is no
+difference in the median number of emergency visits between the two
+groups, is rejected in favor of the alternative hypothesis, indicating
+that there is a true location shift in the number of emergency visits
+between the readmitted and non-readmitted groups.
+
+## Number of diagnoses & readmitted
+
+```{r}
+ggplot(data = df_2, aes(x = number_diagnoses, fill = factor(readmitted))) + 
+  geom_bar(position = "fill") + 
+  scale_x_discrete("Number of diagnoses") + 
+  scale_y_continuous("Frequency") + 
+  guides(fill = guide_legend(title = "Readmitted")) + 
+  scale_fill_manual(values = c("#CC79A7", "#0072B2")) + 
+  labs(title = "Normalized number of diagnoses by Readmission")
+
+# Perform Wilcoxon rank-sum test
+wilcox_test_result <- wilcox.test(number_diagnoses ~ readmitted, data = df_2)
+
+# Print the result
+print(wilcox_test_result)
+```
+
+The Wilcoxon rank sum test was applied to examine whether there exists a
+significant difference in the number of diagnoses between patients who
+were readmitted and those who were not.
+
+The test yielded a Wilcoxon W statistic of 182096528 and an extremely
+low p-value (\< 2.2e-16), indicating a highly significant difference.
+The hull hypothesis is rejected. This result implies that there is
+indeed a true location shift in the number of diagnoses between patients
+who were readmitted and those who were notundefined
+
+## Diabetes medication & readmitted
+
+```{r}
+
+dfC$diabetesMed<- as.factor(dfC$diabetesMed)
+
+# Create a contingency table
+contingency_table <- table(dfC$diabetesMed, dfC$readmitted)
+
+# Print the contingency table
+print(contingency_table)
+
+# Perform chi-square test of independence
+chi_square_test <- chisq.test(contingency_table)
+print(chi_square_test)
+
+# Calculate phi coefficient (correlation coefficient)
+phi_coefficient <- sqrt(chi_square_test$statistic / sum(contingency_table))
+print(phi_coefficient)
+
+# small effect but significant
+
+```
+
+The Pearson's chi-squared test with Yates' continuity correction was
+conducted to evaluate the association between two categorical variables,
+as represented in the contingency table.
+
+The test yielded a chi-squared statistic of 102.94 with 1 degree of
+freedom and a p-value smaller than 2.2e-16, indicating an extremely
+significant association between the variables. The null hypothesis,
+which posits no association between the variables, is rejected in favor
+of the alternative hypothesis. Additionally, the calculated phi
+coefficient, representing the strength of association, is 0.0466174,
+suggesting a weak but statistically significant correlation between the
+two categorical variables.
+
+## Medical specialty & readmitted
+
+```{r}
+# Create a contingency table
+contingency_table <- table(dfC$specialty, dfC$readmitted_2)
+
+# Perform chi-square test of independence
+chi_square_test <- chisq.test(contingency_table)
+
+# Print the chi-square test results
+print(chi_square_test)
+
+# Calculate Cramer's V (optional)
+num_rows <- nrow(contingency_table)
+num_cols <- ncol(contingency_table)
+min_dim <- min(num_rows, num_cols)
+cramers_v <- sqrt(chi_square_test$statistic / (sum(contingency_table) * (min_dim - 1)))
+print(cramers_v)
+
+# weak but signficant
+```
+
+The Pearson's chi-squared test was performed to examine the independence
+between two categorical variables, namely specialty and readmission
+status, as presented in the contingency table.
+
+The test yielded a chi-squared statistic of 56.105 with 6 degrees of
+freedom and a p-value of 2.772e-10, indicating a highly significant
+association between specialty and readmission status. Consequently, the
+null hypothesis of independence is rejected in favor of the alternative
+hypothesis, suggesting a significant relationship between the variables.
+Additionally, Cramer's V coefficient, measuring the strength of
+association, is computed to be 0.03441628, indicating a weak but
+statistically significant correlation between specialty and readmission
+status.
+
+## diag_1 & readmitted
+
+```{r}
+# Create a contingency table
+contingency_table <- table(dfC$diag_1, dfC$readmitted_2)
+
+# Perform chi-square test of independence
+chi_square_test <- chisq.test(contingency_table)
+
+# Print the chi-square test results
+print(chi_square_test)
+
+# Calculate Cramer's V (optional)
+num_rows <- nrow(contingency_table)
+num_cols <- ncol(contingency_table)
+min_dim <- min(num_rows, num_cols)
+cramers_v <- sqrt(chi_square_test$statistic / (sum(contingency_table) * (min_dim - 1)))
+print(cramers_v)
+
+# signficant
+
+dfC$readmitted_2<- as.factor(dfC$readmitted_2)
+
+# Create a bar plot for readmitted and A1Cresult
+ggplot(dfC, aes(x = diag_1, fill = readmitted_2)) +
+  geom_bar(position = "fill", color = "black") +
+  labs(title = "Bar plot for diag_1 and Readmitted",
+       x = "Diag_1", y = "Proportion",
+       fill = "Readmitted") +
+  scale_fill_manual(values = custom_colors[2:3]) +  # Use custom colors for fill
+  custom_theme +  # Customize the theme if needed
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels for better readability
+
+
+
+# table of proportions of primary diagnosis
+label_counts <- table(dfC$primary_diagnosis)
+percentage <- prop.table(label_counts) * 100
+sort(percentage, decreasing = TRUE)
+
+
+```
+
+The chi-square test of independence was conducted to evaluate the
+association between primary diagnosis and readmission status based on
+the contingency table.
+
+The test resulted in a Pearson's chi-squared statistic of 1540.7 with
+659 degrees of freedom and a p-value smaller than 2.2e-16, indicating a
+highly significant association between primary diagnosis and readmission
+status. Consequently, the null hypothesis of independence between the
+two variables is rejected. Cramer's V coefficient, measuring the
+strength of association, is calculated to be 0.1803496, indicating a
+moderate to strong correlation between primary diagnosis and readmission
+status.
+
+Additionally, a bar plot was created to visualize the proportions of
+readmitted and non-readmitted cases for each primary diagnosis. The
+table of proportions of primary diagnoses indicates the percentage
+distribution of each diagnosis category, with circulatory and
+respiratory diagnoses being the most prevalent.
+
+## diag_2 & readmitted
+
+```{r}
+# Create a contingency table
+contingency_table <- table(dfC$diag_2, dfC$readmitted_2)
+
+# Perform chi-square test of independence
+chi_square_test <- chisq.test(contingency_table)
+
+# Print the chi-square test results
+print(chi_square_test)
+
+# Calculate Cramer's V (optional)
+num_rows <- nrow(contingency_table)
+num_cols <- ncol(contingency_table)
+min_dim <- min(num_rows, num_cols)
+cramers_v <- sqrt(chi_square_test$statistic / (sum(contingency_table) * (min_dim - 1)))
+print(cramers_v)
+
+
+```
+
+The Pearson's chi-squared test was utilized to assess the independence
+between two categorical variables, represented by the contingency table.
+The test resulted in a chi-squared statistic of 1204.8 with 674 degrees
+of freedom and a p-value smaller than 2.2e-16, indicating a highly
+significant association between the variables. Consequently, the null
+hypothesis of independence between the two variables is rejected.
+Additionally, Cramer's V coefficient, measuring the strength of
+association, is calculated to be 0.1594871. This indicates a moderate
+association between the variables, suggesting that they are not entirely
+independent but have a noticeable correlation.
+
+## diag_3 & readmitted
+
+```{r}
+# Create a contingency table
+contingency_table <- table(dfC$diag_3, dfC$readmitted_2)
+
+# Perform chi-square test of independence
+chi_square_test <- chisq.test(contingency_table)
+
+# Print the chi-square test results
+print(chi_square_test)
+
+# Calculate Cramer's V (optional)
+num_rows <- nrow(contingency_table)
+num_cols <- ncol(contingency_table)
+min_dim <- min(num_rows, num_cols)
+cramers_v <- sqrt(chi_square_test$statistic / (sum(contingency_table) * (min_dim - 1)))
+print(cramers_v)
+
+# signficant
+```
+
+## Discharge disposition and readmitted
+
+```{r}
+# Create a contingency table
+contingency_table <- table(dfC$discharge_disposition_id, dfC$readmitted_2)
+
+# Perform chi-square test of independence
+chi_square_test <- chisq.test(contingency_table)
+
+# Print the chi-square test results
+print(chi_square_test)
+
+# Calculate Cramer's V (optional)
+num_rows <- nrow(contingency_table)
+num_cols <- ncol(contingency_table)
+min_dim <- min(num_rows, num_cols)
+cramers_v <- sqrt(chi_square_test$statistic / (sum(contingency_table) * (min_dim - 1)))
+print(cramers_v)
+```
+
+The chi-square test of independence was conducted to examine the
+association between *discharge disposition ID* and *readmitted.* The
+test yielded a Pearson's chi-squared statistic of 1176.8 with 13 degrees
+of freedom and a p-value smaller than 2.2e-16, indicating a highly
+significant association between the variables. However, a warning was
+issued during the test, suggesting that the chi-squared approximation
+may be incorrect, which should be taken into consideration when
+interpreting the results.
+
+Additionally, Cramér's V coefficient, a measure of the strength of
+association, was calculated to be 0.1576226. This value suggests a
+moderate association between the discharge disposition identifier and
+the readmission outcome. Therefore, there appears to be a significant
+relationship between the patient's discharge disposition and their
+likelihood of readmission, as indicated by both the chi-square test
+results and Cramér's V coefficient.
+
+## Medication type and readmitted
+
+```{r}
+
+# Create a contingency table
+contingency_table <- table(dfC$medication_type, dfC$readmitted)
+
+# Perform chi-square test of independence
+chi_square_test <- chisq.test(contingency_table)
+
+# Print the chi-square test results
+print(chi_square_test)
+
+# Calculate Cramer's V (optional)
+num_rows <- nrow(contingency_table)
+num_cols <- ncol(contingency_table)
+min_dim <- min(num_rows, num_cols)
+cramers_v <- sqrt(chi_square_test$statistic / (sum(contingency_table) * (min_dim - 1)))
+print(cramers_v)
+
+# Bar plot for medication_type against readmitted
+ggplot(dfC, aes(x = medication_type, fill = factor(readmitted))) +
+  geom_bar(position = "fill") +
+  labs(title = "Bar plot for Medication Type against Readmission",
+       x = "Medication Type", y = "Proportion of Readmitted") +
+  scale_fill_manual(values = c("#0072B2", "#D55E00")) 
+
+```
+
+The Pearson's chi-squared test was conducted to evaluate the association
+between the medication type (categorical variable) and the readmission
+status (binary outcome). The test yielded a chi-squared statistic of
+115.76 with 3 degrees of freedom and a p-value smaller than 2.2e-16,
+indicating a highly significant association between the variables. This
+suggests that the choice of medication type is significantly associated
+with the likelihood of readmission.
+
+Furthermore, Cramér's V coefficient, which measures the strength of
+association, was calculated to be 0.04943576. This value indicates a
+weak but statistically significant correlation between the medication
+type and readmission status. Therefore, although the association is
+statistically significant, its practical significance may be relatively
+small.
+
+## Insulin & readmitted
+
+```{r}
+#  create a contingency table
+contingency_table <- table(dfC$insulin, dfC$readmitted_2)
+
+# Convert the contingency table to a data frame
+contingency_df <- as.data.frame.matrix(contingency_table)
+contingency_df
+
+# Create a contingency table
+contingency_table <- table(dfC$insulin, dfC$readmitted_2)
+
+# Perform chi-square test of independence
+chi_square_test <- chisq.test(contingency_table)
+
+# Print the chi-square test results
+print(chi_square_test)
+
+# Calculate Cramer's V (optional)
+num_rows <- nrow(contingency_table)
+num_cols <- ncol(contingency_table)
+min_dim <- min(num_rows, num_cols)
+cramers_v <- sqrt(chi_square_test$statistic / (sum(contingency_table) * (min_dim - 1)))
+print(cramers_v)
+
+```
+
+The Pearson's chi-squared test was employed to assess the association
+between the use of insulin and readmission status. The test yielded a
+chi-squared statistic of 86.131 with 3 degrees of freedom and a p-value
+smaller than 2.2e-16, indicating a highly significant association
+between the variables. This implies that the utilization of insulin is
+significantly associated with the likelihood of readmission.
+
+Moreover, Cramér's V coefficient, representing the strength of
+association, was computed to be 0.0426423. This value suggests a weak
+but statistically significant correlation between the use of insulin and
+readmission status. Hence, while the association is statistically
+significant, its practical significance may be relatively small.
+
+```{r}
+
+
+```
+
+```{r}
+
+```
+
+## Discharge & readmitted
+
+```{r}
+
+# Create a contingency table
+contingency_table <- table(dfC$discharge, dfC$readmitted)
+
+# Perform Chi-Square test of independence
+chi_square_test <- chisq.test(contingency_table)
+print(chi_square_test)
+
+
+
+# Bar plot for medication_type against readmitted
+ggplot(dfC, aes(x = discharge, fill = factor(readmitted))) +
+  geom_bar(position = "fill") +
+  labs(title = "Bar plot for Discharge against Readmission",
+       x = "Discharge", y = "Proportion of Readmitted") +
+  scale_fill_manual(values = c("#0072B2", "#D55E00")) 
+
+```
+
+The Pearson's chi-squared test with Yates' continuity correction was
+conducted to assess the independence between *discharge* and
+*readmitted*. The contingency table was created to summarize the counts
+of observations falling into different categories of these variables.
+
+The test yielded a chi-squared statistic of 621.44 with 1 degree of
+freedom, indicating a substantial association between the variables.
+Furthermore, the p-value was found to be smaller than 2.2e-16,
+suggesting strong evidence against the null hypothesis of independence.
+Thus, there is a significant relationship between the discharge status
+and the likelihood of readmission in the dataset.
+
+## Admission type ID & readmitted
+
+```{r}
+
+
+# Create a contingency table
+contingency_table <- table(dfC$admission_type_id, dfC$readmitted)
+
+# Perform Chi-Square test of independence
+chi_square_test <- chisq.test(contingency_table)
+print(chi_square_test)
+
+# Calculate Cramer's V (optional)
+num_rows <- nrow(contingency_table)
+num_cols <- ncol(contingency_table)
+min_dim <- min(num_rows, num_cols)
+cramers_v <- sqrt(chi_square_test$statistic / (sum(contingency_table) * (min_dim - 1)))
+print(cramers_v)
+
+# Bar plot for medication_type against readmitted
+ggplot(dfC, aes(x = admission_type_id, fill = factor(readmitted))) +
+  geom_bar(position = "fill") +
+  labs(title = "Bar plot for Admission type id against Readmission",
+       x = "Admission type id", y = "Proportion of Readmitted") +
+  scale_fill_manual(values = c("#0072B2", "#D55E00")) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels
+
+
+
+
+```
+
+\
+The Pearson's chi-squared test was performed to examine the independence
+between *admission type ID* and *readmitted* represented by the
+contingency table. The chi-squared statistic obtained was 46.243 with 3
+degrees of freedom, yielding a highly significant p-value of 5.034e-10.
+This indicates strong evidence against the null hypothesis of
+independence, suggesting that there is a significant association between
+the variables.
+
+Furthermore, Cramér's V coefficient was computed to measure the strength
+of association, resulting in a value of approximately 0.031. While
+statistically significant, this suggests a relatively weak association
+between the variables.
+
+## Race & readmitted
+
+```{r}
+
+## Create a contingency table
+contingency_table <- table(dfC$race, dfC$readmitted)
+
+# Perform Chi-Square test of independence
+chi_square_test <- chisq.test(contingency_table)
+print(chi_square_test)
+
+
+# Calculate Cramer's V (optional)
+num_rows <- nrow(contingency_table)
+num_cols <- ncol(contingency_table)
+min_dim <- min(num_rows, num_cols)
+cramers_v <- sqrt(chi_square_test$statistic / (sum(contingency_table) * (min_dim - 1)))
+print(cramers_v)
+
+# Bar plot for medication_type against readmitted
+ggplot(dfC, aes(x = race, fill = factor(readmitted))) +
+  geom_bar(position = "fill") +
+  labs(title = "Bar plot for Race against Readmission",
+       x = "Race", y = "Proportion of Readmitted") +
+  scale_fill_manual(values = c("#0072B2", "#D55E00")) +
+ theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels
+
+
+
+```
+
+The Pearson's chi-squared test was conducted to assess the independence
+between the "race" variable and the "readmitted" variable, as
+represented by the contingency table. The computed chi-squared statistic
+was 42.883 with 3 degrees of freedom, resulting in a very small p-value
+of 2.605e-09. This indicates strong evidence against the null hypothesis
+of independence, suggesting a significant association between the
+variables.
+
+Additionally, Cramér's V coefficient was calculated to quantify the
+strength of association, yielding a value of approximately 0.030. While
+statistically significant, this value suggests a relatively weak
+association between the "race" and "readmitted" variables.
+
+## Gender & readmitted
+
+```{r}
+
+
+## Create a contingency table
+contingency_table <- table(dfC$gender, dfC$readmitted)
+
+# Perform Chi-Square test of independence
+chi_square_test <- chisq.test(contingency_table)
+print(chi_square_test)
+
+
+
+# Bar plot for medication_type against readmitted
+ggplot(dfC, aes(x = gender, fill = factor(readmitted))) +
+  geom_bar(position = "fill") +
+  labs(title = "Bar plot for Gender against Readmission",
+       x = "Gender", y = "Proportion of Readmitted") +
+  scale_fill_manual(values = c("#0072B2", "#D55E00")) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels
+
+
+```
+
+The Pearson's chi-squared test with Yates' continuity correction was
+conducted to examine the independence between *gender* and *readmitted*
+, as represented by the contingency table. The computed chi-squared
+statistic was 1.92 with 1 degree of freedom, resulting in a p-value of
+0.1659.
+
+With a p-value greater than the conventional significance level of 0.05,
+there is insufficient evidence to reject the null hypothesis of
+independence. This suggests that there may not be a significant
+association between *gender* and *readmitted*.
+
+```{r}
+
+```
+
+# Feature engineering
+
+## Comorbidity scores
+
+```{r}
+
+# Create a boxplot for charlson scores against readmitted
+ggplot(dfC, aes(x = factor(readmitted), y = scores)) +
+  geom_boxplot(fill = custom_colors[5], color = "black") +
+  labs(title = "Distribution of Charlson scores by Readmission",
+       x = "Readmitted", y = "Charlson scores") +
+  custom_theme
+
+# Perform Wilcoxon rank-sum test
+wilcox_test_result <- wilcox.test(scores ~ readmitted, data = dfC)
+
+# Print the result
+print(wilcox_test_result)
+
+
+par(mfrow = c(1, 2))
+
+# Create a histogram with readmission status overlaid
+ggplot(dfC, aes(x = scores, fill = factor(readmitted_2))) +
+  geom_histogram(color = "black", bins = 10, alpha = 0.7, width = 3) +
+  labs(title = "Histogram of Charlson Comorbidity Scores by Readmission",
+       x = "Charlson Comorbidity Score", y = "Frequency",
+       fill = "Readmitted") +
+  scale_fill_manual(values = c("#0072B2", "#F0E442")) +  # Custom colors for readmission status
+  theme_minimal()  # Apply a minimal theme for better readability
+
+
+# Create a histogram with readmission status overlaid
+ggplot(dfC, aes(x = scores, fill = factor(readmitted_2))) +
+  geom_histogram(position = "fill", color = "black", bins = 10, alpha = 0.7, width = 3) +
+  labs(title = "Normalized Histogram of Charlson Comorbidity Scores by Readmission",
+       x = "Charlson Comorbidity Score", y = "Proportion",
+       fill = "Readmitted") +
+  scale_fill_manual(values = c("#0072B2", "#F0E442")) +  # Custom colors for readmission status
+  theme_minimal()  # Apply a minimal theme for better readability
+
+
+
+```
+
+The Wilcoxon rank-sum test was conducted to compare the distribution of
+*log_scores* between the two levels of *readmitted* .
+
+The test resulted in a very low p-value of \< 2.2e-16, indicating strong
+evidence against the null hypothesis. Therefore, we reject the null
+hypothesis and conclude that there is a significant difference in the
+distribution of *log_scores* between the two groups defined by the
+readmitted variable. In other words, the *log_scores* are significantly
+associated with the likelihood of readmission.
+
+## Elixhauser scores
+
+```{r}
+
+# Create a boxplot for num_lab_procedures against readmitted
+ggplot(dfC, aes(x = factor(readmitted_2), y = Escores)) +
+  geom_boxplot(fill = custom_colors[6], color = "black") +
+  labs(title = "Distribution of Elixhauser scores by Readmission Status",
+       x = "Readmitted", y = " Elixhauser scores") +
+  custom_theme
+
+# Perform Wilcoxon rank-sum test
+wilcox_test_result <- wilcox.test(Escores ~ readmitted, data = dfC)
+
+# Print the result
+print(wilcox_test_result)
+
+
+
+```
+
+## HbA1c and readmitted
+
+```{r}
+
+
+# Create cross-tabulation with column proportions
+cross_tab_prop <- prop.table(table(dfC$readmitted, dfC$A1Cresult), margin = 2)
+print(cross_tab_prop)
+
+# Create cross-tabulation for chi-square test
+cross_tab <- table(dfC$readmitted, dfC$A1Cresult)
+chi_square <- chisq.test(cross_tab)
+print(chi_square)
+
+
+
+
+# Calculate Cramer's V 
+num_rows <- nrow(contingency_table)
+num_cols <- ncol(contingency_table)
+min_dim <- min(num_rows, num_cols)
+cramers_v <- sqrt(chi_square_test$statistic / (sum(contingency_table) * (min_dim - 1)))
+print(cramers_v)
+
+
+# barchart of a1c and readmitted
+ggplot(dfC, aes(x = A1Cresult, fill = factor(readmitted))) +
+  geom_bar(position = "stack") +
+  labs(title = "Bar plot for A1Cresult against Readmission",
+       x = "A1Cresult", y = "Proportion of Readmitted") +
+  scale_fill_manual(values = c("#0072B2", "#D55E00")) 
+
+
+
+
+# normalized barchart of a2c and readmitted
+ggplot(dfC, aes(x = A1Cresult, fill = factor(readmitted))) +
+  geom_bar(position = "fill") +
+  labs(title = "Bar plot for A1Cresult against Readmission",
+       x = "A1Cresult", y = "Proportion of Readmitted") +
+  scale_fill_manual(values = c("#0072B2", "#D55E00")) 
+```
+
+The Pearson's chi-squared test was conducted to assess the independence
+between *A1Cresult* and *readmitted*, as represented by the contingency
+table. The computed chi-squared statistic was 9.1599 with 3 degrees of
+freedom, resulting in a p-value of 0.02724.
+
+Since the p-value is less than 0.05, we reject the null hypothesis of
+independence, indicating a significant association between *A1Cresult*
+and *readmitted*. However, the effect size, calculated as Cramer's V,
+was 0.01390619, indicating a small practical significance despite the
+statistical significance.\
+
+## Exploring Hba1c by primary diagnosis
+
+*How does the distribution of hba1c result vary by diagnosis?*
+
+For each diagnosis:
+
+-   Filtered dfC to extract data related to patients diagnosed with
+    (diagnosis)
+
+-   Created a table (hbA1c_table) to summarize the distribution of A1C
+    test results among patients with diabetes unspecified type.
+
+-   Calculated the proportions of each A1C test result category and
+    rounded them to two decimal places. Printed the rounded proportions
+    for analysis.
+
+```{r}
+# diabetes- unspecified type
+diabetes_data <- dfC[dfC$primary_diagnosis == "diabetes unspec", ]
+hbA1c_table <- table(diabetes_data$A1Cresult)
+proportions <- prop.table(hbA1c_table) * 100
+rounded_proportions <- round(proportions, 2)
+print(rounded_proportions)
+
+
+#diabetes- uncontrolled diabetes
+uncontrolled_data <- dfC[dfC$primary_diagnosis == "diabetes uncntrl", ]
+hbA1c_table <- table(uncontrolled_data$A1Cresult)
+proportions <- prop.table(hbA1c_table) * 100
+rounded_proportions <- round(proportions, 2)
+print(rounded_proportions)
+
+# controlled diabetes
+controlled_data <- dfC[dfC$primary_diagnosis == "diabetes cntrl", ]
+hbA1c_table <- table(controlled_data$A1Cresult)
+proportions <- prop.table(hbA1c_table) * 100
+rounded_proportions <- round(proportions, 2)
+print(rounded_proportions)
+
+
+# respiratory
+respiratory_data <- dfC[dfC$primary_diagnosis == "respiratory", ]
+hbA1c_table <- table(respiratory_data$A1Cresult)
+proportions <- prop.table(hbA1c_table) * 100
+rounded_proportions <- round(proportions, 2)
+print(rounded_proportions)
+
+
+# circulatory
+respiratory_data <- dfC[dfC$primary_diagnosis == "circulatory", ]
+hbA1c_table <- table(respiratory_data$A1Cresult)
+proportions <- prop.table(hbA1c_table) * 100
+rounded_proportions <- round(proportions, 2)
+print(rounded_proportions)
+
+# digestive
+respiratory_data <- dfC[dfC$primary_diagnosis == "digestive", ]
+hbA1c_table <- table(respiratory_data$A1Cresult)
+proportions <- prop.table(hbA1c_table) * 100
+rounded_proportions <- round(proportions, 2)
+print(rounded_proportions)
+
+# gerintourinary
+respiratory_data <- dfC[dfC$primary_diagnosis == "genitourinary", ]
+hbA1c_table <- table(respiratory_data$A1Cresult)
+proportions <- prop.table(hbA1c_table) * 100
+rounded_proportions <- round(proportions, 2)
+print(rounded_proportions)
+
+# injury
+injury_data <- dfC[dfC$primary_diagnosis == "injury", ]
+hbA1c_table <- table(injury_data$A1Cresult)
+proportions <- prop.table(hbA1c_table) * 100
+rounded_proportions <- round(proportions, 2)
+print(rounded_proportions)
+
+
+# musculoskeletal
+musc_data <- dfC[dfC$primary_diagnosis == "musculoskeletal", ]
+hbA1c_table <- table(musc_data$A1Cresult)
+proportions <- prop.table(hbA1c_table) * 100
+rounded_proportions <- round(proportions, 2)
+print(rounded_proportions)
+
+# neoplasms
+neo_data <- dfC[dfC$primary_diagnosis == "neoplasms", ]
+hbA1c_table <- table(neo_data$A1Cresult)
+proportions <- prop.table(hbA1c_table) * 100
+rounded_proportions <- round(proportions, 2)
+print(rounded_proportions)
+
+```
+
+*How does the distribution of hba1c vary when primary diagnosis is
+diabetes?*
+
+-   Created three new binary variables (diabetes_primary,
+    diabetes_secondary, diabetes_tertiary) to represent whether diabetes
+    is present in the primary, secondary, or tertiary diagnosis.
+
+-   Assigned a value of 1 if the diagnosis contains any form of diabetes
+    ("diabetes cntrl", "diabetes uncntrl", "diabetes unspec"), otherwise
+    assigned 0.
+
+-   Subsetted dfC to extract data where diabetes is present in any
+    diagnosis (diabetes_data).
+
+-   Created a table to summarize the distribution of A1C test results
+    among patients with diabetes.
+
+-   Calculated the proportions of each A1C test result category and
+    rounded them for analysis.
+
+## homoegeneity test of proportions
+
+### uncontrolled vs controlled diabetes
+
+```{r}
+# Create a matrix with the counts for each group
+counts_matrix <- matrix(c(
+                          54.96, 38.23, 4.93, 1.88,
+                          66.24, 25.38, 5.08, 3.30
+                          ), 
+                        ncol = 4, byrow = TRUE)
+
+# Perform chi-squared test
+chisq_result <- chisq.test(counts_matrix)
+
+# Display results
+print(chisq_result) # too small
+
+# Perform Fisher's exact test
+fisher_result <- fisher.test(counts_matrix)
+
+# Display results
+print(fisher_result)
+
+
+```
+
+The Fisher's exact test was conducted on the provided count data matrix
+representing patients with uncontrolled and controlled diabetes,
+yielding a p-value of 0.2689. With a significance level set at 0.05,
+this result suggests that there is insufficient evidence to reject the
+null hypothesis, indicating that the proportions of HbA1c levels across
+the groups are not significantly different. Therefore, we cannot
+conclude that there is a significant association between the groups and
+the distribution of HbA1c levels based on this analysis. The group
+"None" was removed to see if results are different.
+
+### uncontrolled vs controlled diabetes without "None"
+
+```{r}
+# Create a matrix with the counts for each group
+counts_matrix <- matrix(c(
+                           38.23, 4.93, 1.88,
+                          25.38, 5.08, 3.30
+                          ), 
+                        ncol = 3, byrow = TRUE)
+
+# Perform chi-squared test
+chisq_result <- chisq.test(counts_matrix)
+
+# Display results
+print(chisq_result) # too small
+
+# Perform Fisher's exact test
+fisher_result <- fisher.test(counts_matrix)
+
+# Display results
+print(fisher_result)
+
+
+```
+
+After removing records with A1Cresult= None, Fisher's exact test was
+conducted on the provided count data matrix representing patients with
+uncontrolled and controlled diabetes, yielding a p-value of 0.4962. With
+a significance level set at 0.05, this result suggests that there is
+insufficient evidence to reject the null hypothesis, indicating that the
+proportions of HbA1c levels across the groups are not significantly
+different. Therefore, we cannot conclude that there is a significant
+association between the groups and the distribution of HbA1c levels
+based on this analysis. The group "None" was removed to see if results
+are different.
+
+### uncontrolled vs controlled diabetes as binary
+
+```{r}
+
+counts_matrix <- matrix(c(
+                         55.96,  44.94,
+                         66.24, 33.76
+                          ), 
+                        ncol = 2, byrow = TRUE)
+
+# Perform chi-squared test
+chisq_result <- chisq.test(counts_matrix)
+
+# Display results
+print(chisq_result) # too small
+
+# Perform Fisher's exact test
+fisher_result <- fisher.test(counts_matrix)
+
+# Display results
+print(fisher_result)
+
+```
+
+After converting A1Cresult to a binary variable, Fisher's exact test was
+conducted on the count data matrix representing patients with
+uncontrolled and controlled diabetes, yielding a p-value of 0.4874. With
+a significance level set at 0.05, this result suggests that there is
+insufficient evidence to reject the null hypothesis, indicating that the
+proportions of HbA1c levels across the groups are not significantly
+different. Therefore, we cannot conclude that there is a significant
+association between the groups and the distribution of HbA1c levels
+based on this analysis. The group "None" was removed to see if results
+are different.
+
+### unspecified vs uncontrolled diabetes
+
+```{r}
+
+
+counts_matrix <- matrix(c(
+                         70.09, 17.39,  7.28,  5.24, 
+                         54.96, 38.23,  4.93,  1.88 
+                          ), 
+                        ncol = 4, byrow = TRUE)
+
+# Perform chi-squared test
+chisq_result <- chisq.test(counts_matrix)
+
+# Display results
+print(chisq_result) # too small
+
+# Perform Fisher's exact test
+fisher_result <- fisher.test(counts_matrix)
+
+# Display results
+print(fisher_result)
+```
+
+Fisher's exact test was conducted on the count data matrix representing
+patients with unspecified and uncontrolled diabetes, yielding a p-value
+of 0.007197. With a significance level set at 0.05, this result suggests
+that there is sufficient evidence to reject the null hypothesis,
+indicating that the proportions of HbA1c levels across the groups are
+significantly different. Therefore, we can conclude that there is a
+significant association between the groups and the distribution of HbA1c
+levels among pateitnes with unspecified and uncontrolled diabetes.
+
+### unspecified vs controlled diabetes
+
+```{r}
+
+
+counts_matrix <- matrix(c(
+                         70.09, 17.39,  7.28,  5.24, 
+                         66.24, 25.38,  5.08,  3.30  
+                          ), 
+                        ncol = 4, byrow = TRUE)
+
+# Perform chi-squared test
+chisq_result <- chisq.test(counts_matrix)
+
+# Display results
+print(chisq_result) # too small
+
+# Perform Fisher's exact test
+fisher_result <- fisher.test(counts_matrix)
+
+# Display results
+print(fisher_result)
+```
+
+Fisher's exact test was conducted on the count data matrix representing
+patients with unspecified and uncontrolled diabetes, yielding a p-value
+of 0.4698. With a significance level set at 0.05, this result suggests
+that there is insufficient evidence to reject the null hypothesis,
+indicating that the proportions of HbA1c levels across the groups are
+not significantly different. Therefore, we cannot conclude that there is
+a significant association between the groups and the distribution of
+HbA1c levels among patients with unspecified and controlled diabetes.\
+
+### 
+
+```{r}
+
+
+
+```
+
+## diabetes as primary diagnosis
+
+```{r}
+
+
+# Create a new binary variable to represent diabetes as binary for each diagnosis 
+dfC$diabetes_primary <- ifelse(grepl("diabetes cntrl|diabetes uncntrl|diabetes unspec", dfC$primary_diagnosis), 1, 0)
+dfC$diabetes_secondary <- ifelse(grepl("diabetes cntrl|diabetes uncntrl|diabetes unspec", dfC$secondary_diagnosis), 1, 0)
+dfC$diabetes_tertiary <- ifelse(grepl("diabetes cntrl|diabetes uncntrl|diabetes unspec", dfC$tertiary_diagnosis), 1, 0)
+
+# Subset df to make diabetes 1
+diabetes_data <- dfC[dfC$diabetes_primary == 1 | dfC$diabetes_secondary == 1 | dfC$diabetes_tertiary == 1, ]
+hbA1c_table <- table(diabetes_data$A1Cresult)
+proportions <- prop.table(hbA1c_table) * 100
+rounded_proportions <- round(proportions, 2)
+print(rounded_proportions)
+
+
+# diabetes primary and circulatory secondary
+table_data <- dfC[(dfC$diabetes_primary == 1 & dfC$secondary_diagnosis == "circulatory"), ]
+hbA1c_table <- table(table_data$A1Cresult)
+proportions <- prop.table(hbA1c_table) * 100
+rounded_proportions <- round(proportions, 2)
+print(rounded_proportions)
+
+
+# diabetes primary and respiratory secondary
+table_data <- dfC[(dfC$diabetes_primary == 1 & dfC$secondary_diagnosis == "respiratory"), ]
+hbA1c_table <- table(table_data$A1Cresult)
+proportions <- prop.table(hbA1c_table) * 100
+rounded_proportions <- round(proportions, 2)
+print(rounded_proportions)
+
+
+# diabetes primary and genitourinary secondary
+table_data <- dfC[(dfC$diabetes_primary == 1 & dfC$secondary_diagnosis == "genitourinary"), ]
+hbA1c_table <- table(table_data$A1Cresult)
+proportions <- prop.table(hbA1c_table) * 100
+rounded_proportions <- round(proportions, 2)
+print(rounded_proportions)
+
+
+
+# diabetes primary and nervous system secondary
+table_data <- dfC[(dfC$diabetes_primary == 1 & dfC$secondary_diagnosis == "nervous system"), ]
+hbA1c_table <- table(table_data$A1Cresult)
+proportions <- prop.table(hbA1c_table) * 100
+rounded_proportions <- round(proportions, 2)
+print(rounded_proportions)
+
+
+
+# diabetes primary and endocrine, nuritional/metabolic secondary
+table_data <- dfC[(dfC$diabetes_primary == 1 & dfC$secondary_diagnosis == "endocrine, nuritional/metabolic"), ]
+hbA1c_table <- table(table_data$A1Cresult)
+proportions <- prop.table(hbA1c_table) * 100
+rounded_proportions <- round(proportions, 2)
+print(rounded_proportions)
+
+# diabetes primary and mental disorders secondary
+table_data <- dfC[(dfC$diabetes_primary == 1 & dfC$secondary_diagnosis == "Mental disorders"), ]
+hbA1c_table <- table(table_data$A1Cresult)
+proportions <- prop.table(hbA1c_table) * 100
+rounded_proportions <- round(proportions, 2)
+print(rounded_proportions)
+
+
+```
+
+This script is segmenting and analyzing diabetes-related data based on
+primary and secondary diagnoses, focusing on A1C results. Here's the
+interpretation for each segment:
+
+**Diabetes as any diagnosis:**
+
+-   \*\*None\*\*: 77.53% of patients have no A1C test results.
+
+-   \>8\*\*: 13.35% have A1C greater than 8%.
+
+-   Norm\*\*: 4.96% have normal A1C levels.
+
+-   \>7\*\*: 4.16% have A1C greater than 7%.
+
+**Diabetes Primary and Circulatory Secondary:**
+
+-   **None:** 71.66% of patients have no A1C test results.
+
+-   **\>8:** 17.11% have A1C greater than 8%.
+
+-   **Norm**: 6.42% have normal A1C levels.
+
+-   **\>7:** 4.81% have A1C greater than 7%.
+
+**Diabetes Primary and Respiratory Secondary:**
+
+-   **\*\*None\*\***: 63.35% of patients have no A1C test results.
+
+-   **\>8\*\*:** 26.70% have A1C greater than 8%.
+
+-   **Norm\*\*:** 6.81% have normal A1C levels.
+
+-   **\>7\*\*:** 3.14% have A1C greater than 7%.
+
+**Diabetes Primary and Genitourinary Secondary:**
+
+-   **None**: 59.86% of patients have no A1C test results.
+
+-   **\>8:** 29.93% have A1C greater than 8%.
+
+-   **Norm**: 5.99% have normal A1C levels.
+
+-   **\>7**: 4.23% have A1C greater than 7%.
+
+**Diabetes Primary and Nervous System Secondary:**
+
+-   **None:** 58.06% of patients have no A1C test results.
+
+-   **\>8:** 30.65% have A1C greater than 8%.
+
+-   **Norm:** 6.45% have normal A1C levels.
+
+-   **\>7:** 4.84% have A1C greater than 7%.
+
+**Diabetes Primary and Endocrine, Nutritional/Metabolic Secondary**:
+
+-   **None**: 59.58% of patients have no A1C test results.
+
+-   **\>8**: 34.83% have A1C greater than 8%.
+
+-   **Norm**: 4.60% have normal A1C levels.
+
+-   **\>7**: 1.00% have A1C greater than 7%.
+
+**Diabetes Primary and Mental Disorders Secondary**
+
+-   **None:** 59.26% of patients have no A1C test results.
+
+-   **\>8:** 24.44% have A1C greater than 8%.
+
+-   **Norm**: 13.33% have normal A1C levels.
+
+-   \>7: 2.96% have A1C greater than 7%.
+
+These results provide insights into A1C levels across different
+diabetes-related diagnoses, highlighting variations in A1C distributions
+among patients with different primary and secondary diagnoses.
+
+## save dfC
+
+```{r}
+
+write.csv(dfC, "dfC")
+
+```

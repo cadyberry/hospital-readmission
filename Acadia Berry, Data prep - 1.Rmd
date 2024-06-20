@@ -1,0 +1,2088 @@
+---
+title: "Acadia Berry, Data Prep"
+author: "Acadia Berry"
+date: "2024-04-25"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load packages
+
+```{r load packages}
+library(ggplot2)
+library(psych)
+library(dplyr)
+library(caret)
+library(tidyverse)
+library(psych)
+library(car)
+library(plyr)
+library(rpart)
+library(pROC)
+library(broom)
+library(caret)
+library(rattle)
+library(smotefamily)
+library(ResourceSelection)
+library(comorbidity)
+library(xgboost)
+library(shapr)
+library(rpart.plot)
+library(randomForest)
+library(glmnet)
+library(fastDummies)
+library(MASS)
+
+# Define a custom color palette with professional colors
+custom_colors <- c("#0072B2", "#009E73", "#F55E00", "#CC79A7", "#F0E442", "#E69F00", "#F5B4E9", "#A5B4E9","#15BE37","#241571", "#FFC300", "#DAF7A6")
+
+# Set a global theme for ggplot2 
+custom_theme <- theme_minimal() +
+  theme(
+    text = element_text(size = 12),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10),
+    panel.background = element_rect(fill = "white"), 
+    plot.background = element_rect(fill = "white"),   
+    panel.grid.major = element_line(color = "gray"), 
+    panel.grid.minor = element_line(color = "lightgray")  
+  
+  )
+
+# Set the global theme
+theme_set(custom_theme)
+
+```
+
+# Load Data
+
+```{r}
+getwd()
+
+df<- read.csv("diabetic_data.csv")
+df_copy <- df
+
+```
+
+# Summary of the data
+
+```{r}
+
+
+# Check if each column is character and convert to factor if true
+for (col in names(df)) {
+  if (is.character(df[[col]])) {
+    df[[col]] <- factor(df[[col]])
+  }
+}
+
+# data set summaries 
+glimpse(df)
+#describe(df)
+summary(df)
+
+```
+
+# Basic Data Cleaning
+
+## Checking for missing data
+
+```{r}
+
+# sum of missing colums
+colSums(is.na(df))
+
+table(df$payer_code) # 40256 missing
+
+table(df$weight) # 98569 missing
+
+table(df$age) # no missing records
+
+table(df$race) # 2273 missing 
+
+table(df$medical_specialty) # 49949 missing 
+
+table(df$A1Cresult) # 49949 missing
+```
+
+Payer_code has 40,256 missing, weight has 98,569 missing, medical
+specialty has 49,949 missing, A1c has 49,949 missing. Age does not have
+any records with missing data.
+
+## Duplicate records
+
+```{r}
+
+# Check for duplicate records from all columns
+duplicates <- df[duplicated(df), ]
+print(duplicates)
+
+
+```
+
+There are no duplicate records.
+
+## Correcting data types
+
+```{r}
+
+df$race <- as.factor(df$race)
+df$admission_type_id <- as.factor(df$admission_type_id)
+df$discharge_disposition_id <- as.factor(df$discharge_disposition_id)
+df$admission_source_id <- as.factor(df$admission_source_id)
+df$diag_1 <- as.factor(df$diag_1)
+df$diag_2 <- as.factor(df$diag_2)
+df$diag_3 <- as.factor(df$diag_3)
+
+```
+
+# Variable Pre-processing
+
+## Update *Readmitted*
+
+-   Created a new variable named *readmit* to preserve the original
+    levels of the *readmitted* variable.
+-   Transformed the *readmitted* variable into a binary outcome where
+    "\<30" is coded as "1" and "\>30" plus "NO" are coded as "0", making
+    it suitable for binary classification.
+-   Converted the modified *readmitted* variable into a factor to
+    maintain its categorical nature.
+-   Checked the distribution of the original *readmit* to ensure
+    preservation of the original proportions.
+-   Checked the distribution of the modified *readmitted* variable to
+    verify the transformation into binary outcomes.
+
+```{r}
+
+# Preserve original levels of readmitted as "readmit"
+df$readmit<- df$readmitted
+
+# Make readmitted binary with 1 = "<30",  0 = ">30" + "NO"
+df$readmitted <- ifelse(df$readmitted == "<30", "1", "0")
+df$readmitted<- as.factor(df$readmitted)
+
+
+# Distribution of readmitted
+table(df$readmit)
+table(df$readmitted)
+
+```
+
+## Update medical specialty
+
+-   Defined grouping categories for medical specialties based on similar
+    disciplines.
+-   Created a new variable called *specialty* using the *case_when*
+    function in R, assigning each medical specialty to one of the
+    defined categories.
+-   Checked the distribution of the new *specialty* variable using the
+    table function to verify the categorization.
+-   Checked the number of unique medical specialties in the original
+    dataset to compare with the number of categories created.
+
+```{r}
+
+
+# Define the grouping categories
+categories <- list(
+  "Internal_Medicine" = c("InternalMedicine", "Hospitalist", "Resident"),
+  "Emergency/Trauma" = "Emergency/Trauma",
+  "Family/GeneralPractice" = "Family/GeneralPractice", 
+  "Missing" = c("?", "PhysicianNotFound"),
+  "Surgery" = c("Surgeon", 
+                "Surgery-Cardiovascular", 
+                "Surgery-Cardiovascular/Thoracic", 
+                "Surgery-Colon&Rectal",
+                "Surgery-General", 
+                "Surgery-Maxillofacial", 
+                "Surgery-Neuro", 
+                "Surgery-Plastic", 
+                "Surgery-PlasticwithinHeadandNeck", 
+                "Surgery-Thoracic", 
+                "Surgery-Vascular", 
+                "SurgicalSpecialty"),
+ "Pediatrics" = c("Pediatrics", 
+                  "Pediatrics-CriticalCare", 
+                  "Pediatrics-EmergencyMedicine", 
+                  "Pediatrics-Endocrinology", 
+                  "Surgery-Pediatric", 
+                  "Pediatrics-Hematology-Oncology", 
+                  "Pediatrics-Neurology", 
+                  "Pediatrics-Pulmonology", 
+                  "Pediatrics-InfectiousDiseases",
+                  "Cardiology-Pediatric",
+                  "Pediatrics-AllergyandImmunology", 
+                  "Anesthesiology-Pediatric"),
+ "Cardiology" = "Cardiology",
+ "Other" = c("Dermatology", 
+                           "Hematology", 
+                           "Hematology/Oncology",
+                           "InfectiousDiseases", 
+                           "Nephrology", 
+                           "Neurology", 
+                           "Ophthalmology", 
+                           "Osteopath",
+                           "Orthopedics",
+                           "Orthopedics-Reconstructive", 
+                           "Otolaryngology", 
+                           "Perinatology", 
+                           "Psychiatry",
+                           "Psychiatry-Addictive", 
+                           "Psychiatry-Child/Adolescent", 
+                           "Pulmonology", 
+                           "Rheumatology", 
+                           "Urology", 
+                           "AllergyandImmunology",
+                          "Anesthesiology", 
+                          "Endocrinology-Metabolism",
+                         "Neurophysiology",
+                         "Dentistry",  
+                         "Endocrinology",  
+                         "Gynecology", 
+                         "Gastroenterology",
+                          "Obsterics&Gynecology-GynecologicOnco",
+                         "DCPTEAM",
+                         "Obstetrics", 
+                         "ObstetricsandGynecology", 
+                         "Oncology",
+                         "OutreachServices", 
+                         "Pathology",
+                         "PhysicalMedicineandRehabilitation",
+                         "Podiatry", 
+                         "Proctology", 
+                         "Psychology", 
+                         "Radiologist",
+                         "Radiology", 
+                         "Speech", 
+                         "SportsMedicine"))
+
+# Create specialty 
+df <- df %>%
+  mutate(specialty = case_when(
+    medical_specialty %in% categories[["Internal_Medicine"]] ~ "Internal_Medicine",
+    medical_specialty %in% categories[["Surgery"]] ~ "Surgery",
+    medical_specialty %in% categories[["Family/GeneralPractice"]] ~ "Family/GeneralPractice",
+    medical_specialty %in% categories[["Emergency/Trauma"]] ~ "Emergency/Trauma",
+    medical_specialty %in% categories[["Missing"]] ~ "Missing",
+    medical_specialty %in% categories[["Cardiology"]] ~ "Cardiology",
+    medical_specialty %in% categories[["Pediatrics"]] ~ "Pediatrics",
+    medical_specialty %in% categories[["Other"]] ~ "Other",
+    TRUE ~ "Other_Specialties"
+  ))
+
+# Check the first few rows to verify
+table(df$specialty)
+
+# number in data
+length(unique(df_copy$medical_specialty))
+
+
+
+```
+
+## Update age
+
+-   Created a bar plot for *age* to visualize its distribution using
+    custom colors.
+-   Checked the frequency distribution of *age* to understand its
+    initial distribution.
+-   Transformed *age* into numeric categories by assigning midpoint
+    values to each age range.
+-   Checked the frequency distribution of the modified *age* to verify
+    the transformation into numeric categories.
+-   Filtered out records with ages between 0 and 10 to remove potential
+    outliers.
+-   Checked the frequency distribution of the *age* variable after
+    filtering out records with ages between 0 and 10.
+-   Condensed the age categories into three groups: 0_to_30, 30_to_60,
+    and 60_and_up.
+-   Checked the counts for each age group after condensing the age
+    categories.
+
+```{r}
+
+# Create a bar plot for the race variable with custom colors
+ggplot(df, aes(x = age, fill = age)) +
+  geom_bar() +
+  labs(title = "Bar plot of Age",
+       x = "Age", y = "Frequency") +
+  scale_fill_manual(values = custom_colors) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) # Set custom bar colors
+
+# table of counts
+table(df$age)
+
+# make it numeric 
+df <- df %>%
+  mutate(age_2 = case_when(
+    age %in% c("[0-10)") ~ "5",
+    age %in% c("[10-20)") ~ "15", 
+    age %in% c("[20-30)") ~ "25",
+    age %in% c("[30-40)") ~ "35",
+    age %in% c("[40-50)") ~ "45",
+    age %in% c("[50-60)") ~ "55",
+    age %in% c("[60-70)") ~ "65",
+    age %in% c("[70-80)") ~ "75",
+    age %in% c("[80-90)") ~ "85",
+    age %in% c("[90-100)") ~ "95",
+    TRUE ~ age
+  ))
+
+table(df$age_2)
+
+
+# Filtering out records with ages between 0 and 10
+df <- subset(df, !(age %in% c("[0-10)")))
+table(df$age)
+
+# condense categories
+df <- df %>%
+  mutate(age = case_when(
+    age %in% c("[0-10)", "[10-20)", "[20-30)") ~ "0_to_30",
+    age %in% c("[30-40)", "[40-50)", "[50-60)") ~ "30_to_60",
+   TRUE ~ "60_and_up"
+  ))
+
+# Check the counts for each age group
+
+table(df$age)
+
+```
+
+## Update race
+
+-   Modified *race* to categorize certain races into broader groups for
+    analysis.
+-   Assigned the label *missing* to records with missing or unidentified
+    race information denoted by "?".
+-   Grouped races labeled as *Asian, Hispanic* or *Othe*r into a single
+    category labeled *Other*.
+
+```{r}
+
+df <- df %>%
+  mutate(race = case_when(
+    race %in% c("?") ~ "Missing",
+    race %in% c("Asian", "Hispanic", "Other") ~ "Other",
+    race %in% c("AfricanAmerican") ~ "AfricanAmerican",
+    race %in% c("Caucasian") ~ "Caucasian",
+    
+  ))
+
+# Check the counts for each race group
+table(df$race)
+
+```
+
+## Update Primary, Secondary, Tertiary diagnosis
+
+-   Utilized the mutate() function to create new variables
+    primary_diagnosis, secondary_diagnosis, and tertiary_diagnosis, each
+    categorized based on the diagnosis codes.
+
+-   Applied the case_when() function to assign diagnoses to their
+    respective groups based on the diagnosis codes provided in the
+    documentation available on the UCI ML webpage.
+
+-   Generated frequency tables to verify the distribution of diagnoses
+    across the different categories (primary_diagnosis,
+    secondary_diagnosis, and tertiary_diagnosis).
+
+```{r}
+# icd-9 codes that indicate uncontrolled diabetes
+uncntrl_codes <- c("250.62", "250.63", "250.32", "250.33",
+                                   "250.42", "250.43",  "250.52", "250.53",
+                                   "250.22","250.23",  "250.12", 
+                                   "250.13","250.02", "250.03", "250.92",
+                                   "250.93", "250.82", "250.83", "250.72",
+                                   "250.73")
+# icd-9 codes that indicate controlled diabetes
+cntrl_codes<- c("250.01", "250.91", "250.81", "250.71",  "250.61", "250.51",  "250.41", "250.31", "250.21",  "250.11")
+
+# icd-9 codes that indicate unspecified diabetes              
+diabetes_unspec_codes <- c("250", "250.9", "250.8", "250.6", "250.4", "250.7", "250.5", "250.3", "250.2", "250.1")
+
+# function to categorize ICD-9 codes
+df <- mutate(df,
+             primary_diagnosis = case_when(
+               diag_1 %in% c(390:459, 785) ~ "circulatory",
+               diag_1 %in% c(460:519, 786) ~ "respiratory",
+               diag_1 %in% c(520:579, 787) ~ "digestive",
+               diag_1 %in% uncntrl_codes ~ 
+                 "diabetes uncntrl",
+               diag_1 %in% cntrl_codes ~ 
+                 "diabetes cntrl",
+               diag_1 %in% diabetes_unspec_codes ~ 
+                 "diabetes unspec",
+               diag_1 %in% c(800:999) ~ "injury",
+               diag_1 %in% c(710:739) ~ "musculoskeletal",
+               diag_1 %in% c(580:629, 788) ~ "genitourinary",
+               diag_1 %in% c(140:239) ~ "neoplasms",
+               diag_1 %in% c(780, 781, 783, 784, 789, 790:799) ~ 
+                 "other symp",
+               diag_1 %in% c(240:249, 251:279) ~ 
+                 "endocrine, nuritional/metabolic",
+               diag_1 %in% c(680:709, 782) ~
+                 "skin and subcutaneous tissue",
+               diag_1 %in% c(1:139) ~ 
+                 "infectious and parasitic",
+               diag_1 %in% c(740:759) ~ 
+                 "congenital anamolies",
+               diag_1 %in% c(290:319) ~
+                 "Mental disorders",
+               diag_1 %in% c(280:289) ~ 
+                 "blood disorders",
+               diag_1 %in% c(320:359) ~ 
+                 "nervous system",
+               diag_1 %in% c(630:679) ~ 
+                 "pregnancy complications",
+               diag_1 %in% c(360:389) ~ 
+                 "sense organs",
+                grepl("V", diag_1) ~ 
+                 "external causes",
+               grepl("E", diag_1) ~ 
+                 "external causes",
+               grepl("?", diag_1) ~ 
+                 "other symp",
+               TRUE ~ as.character(diag_1)
+             ))
+table(df$primary_diagnosis)
+```
+
+```{r}
+
+# categorize diag_2
+df <- mutate(df,
+             secondary_diagnosis = case_when(
+               diag_2 %in% c(390:459, 785) ~ 
+                 "circulatory",
+               diag_2 %in% c(460:519, 786) ~ 
+                 "respiratory",
+               diag_2 %in% c(520:579, 787) ~ 
+                 "digestive",
+               diag_2 %in% uncntrl_codes ~
+                 "diabetes uncntrl",
+               diag_2 %in% cntrl_codes ~ 
+                 "diabetes cntrl",
+               diag_2 %in% diabetes_unspec_codes ~ 
+                 "diabetes unspec",
+               diag_2 %in% c(800:999) ~ 
+                 "injury",
+               diag_2 %in% c(710:739) ~ 
+                 "musculoskeletal",
+               diag_2 %in% c(580:629, 788) ~ 
+                 "genitourinary",
+               diag_2 %in% c(140:239) ~ 
+                 "neoplasms",
+               diag_2 %in% c(780, 781, 783, 784, 789, 790:799) ~ 
+                 "other symp",
+               diag_2 %in% c(240:249, 251:279) ~ 
+                 "endocrine, nuritional/metabolic",
+               diag_2 %in% c(680:709, 782) ~ 
+                 "skin and subcutaneous tissue",
+               diag_2 %in% c(1:139) ~ 
+                 "infectious and parasitic",
+               diag_2 %in% c(740:759) ~
+                 "congenital anamolies",
+               diag_2 %in% c(290:319) ~ 
+                 "Mental disorders",
+               diag_2 %in% c(280:289) ~ 
+                 "blood disorders",
+               diag_2 %in% c(320:359) ~ 
+                 "nervous system",
+               diag_2 %in% c(630:679) ~
+                 "pregnancy complications",
+               diag_2 %in% c(360:389) ~ 
+                 "sense organs",
+                grepl("V", diag_2) ~
+                 "external causes",
+               grepl("E", diag_2) ~ 
+                 "external causes",
+               grepl("?", diag_2) ~ 
+                 "other symp",
+               TRUE ~ as.character(diag_2)
+             ))
+
+table(df$secondary_diagnosis)
+
+# categorize diag_3
+df <- mutate(df,
+             tertiary_diagnosis = case_when(
+               diag_3 %in% c(390:459, 785) ~ 
+                 "circulatory",
+               diag_3 %in% c(460:519, 786) ~ 
+                 "respiratory",
+               diag_3 %in% c(520:579, 787) ~ 
+                 "digestive",
+               diag_3 %in% uncntrl_codes ~
+                 "diabetes uncntrl",
+               diag_3 %in% cntrl_codes ~ 
+                 "diabetes cntrl",
+               diag_3 %in% diabetes_unspec_codes ~ 
+                 "diabetes unspec",
+               diag_3 %in% c(800:999) ~ 
+                 "injury",
+               diag_3 %in% c(710:739) ~ 
+                 "musculoskeletal",
+               diag_3 %in% c(580:629, 788) ~ 
+                 "genitourinary",
+               diag_3 %in% c(140:239) ~ 
+                 "neoplasms",
+               diag_3 %in% c(780, 781, 783, 784, 789, 790:799) ~ 
+                 "other symp",
+               diag_3 %in% c(240:249, 251:279) ~ 
+                 "endocrine, nuritional/metabolic",
+               diag_3 %in% c(680:709, 782) ~ 
+                 "skin and subcutaneous tissue",
+               diag_3 %in% c(1:139) ~ 
+                 "infectious and parasitic",
+               diag_3 %in% c(740:759) ~
+                 "congenital anamolies",
+               diag_3 %in% c(290:319) ~ 
+                 "Mental disorders",
+               diag_3 %in% c(280:289) ~ 
+                 "blood disorders",
+               diag_3 %in% c(320:359) ~ 
+                 "nervous system",
+               diag_3 %in% c(630:679) ~
+                 "pregnancy complications",
+               diag_3 %in% c(360:389) ~ 
+                 "sense organs",
+                grepl("V", diag_3) ~
+                 "external causes",
+               grepl("E", diag_3) ~ 
+                 "external causes",
+               grepl("?", diag_3) ~ 
+                 "other symp",
+               TRUE ~ as.character(diag_3)
+             ))
+
+table(df$tertiary_diagnosis)
+# set as factors
+df$primary_diagnosis<- as.factor(df$primary_diagnosis)
+df$secondary_diagnosis<- as.factor(df$secondary_diagnosis)
+df$tertiary_diagnosis<- as.factor(df$tertiary_diagnosis)
+
+```
+
+number of unique values of diagnoses:
+
+```{r}
+
+length(unique(df$diag_1))
+length(unique(df$diag_2))
+length(unique(df$diag_3))
+```
+
+There are 717 unique icd9 codes in diagnosis 1, 749 unique codes in
+diagnosis 2 and 790 unique codes in diagnosis 3.
+
+## Update Discharge Disposition
+
+-   Employed the mutate() function to update the
+    discharge_disposition_id variable based on specific conditions,
+    assigning more meaningful categories to the discharge disposition
+    codes.
+-   Utilized the case_when() function to map each discharge disposition
+    code to its corresponding category, such as *home,
+    short_term_hospital, SNF* (skilled nursing facility), *ICF*
+    (intermediate care facility), and others.
+-   Created a new variable named discharge by transforming the
+    discharge_disposition_id variable into a binary variable, where
+    *Home* indicates patients discharged to home and *Other* indicates
+    all other discharge dispositions.
+-   Generated a frequency table to examine the distribution of discharge
+    dispositions after the update, providing insights into the new
+    categories assigned to the discharge disposition codes.
+
+```{r}
+df <- df %>%
+  mutate(discharge_disposition_id = case_when(
+    discharge_disposition_id == 1 ~ "home",
+    discharge_disposition_id == 2 ~ "short_term_hospital",
+    discharge_disposition_id == 3 ~ "SNF",
+    discharge_disposition_id == 4 ~ "ICF",
+    discharge_disposition_id == 5 ~ "transfer_inpatient",
+    discharge_disposition_id == 7 ~ "left_AMA",
+    discharge_disposition_id == 22 ~ "transfer_rehab",
+    discharge_disposition_id == 23 ~ "transfer_long_term",
+    discharge_disposition_id == 28 ~ "transfer_psych",
+    discharge_disposition_id %in% c(6, 8) ~ 
+      "home_w_health_services",
+    discharge_disposition_id %in% c(12,16, 17 ) ~ 
+      "transfer_outpatient",
+    
+    discharge_disposition_id %in% c(24, 27, 29) ~ 
+      "transfer_other_external",
+    discharge_disposition_id %in% c(13, 14) ~ 
+      "hospice",
+    discharge_disposition_id %in% c(11, 19, 20, 21) ~ 
+      "expired",
+    discharge_disposition_id %in% c(25, 26, 18) ~ 
+      "unknown",
+    discharge_disposition_id %in% c(9, 10, 15) ~ 
+      "Other",
+    discharge_disposition_id == 7 ~ "Emergency" ))
+
+# see categories
+table(df$discharge_disposition_id)
+
+# total counts of each unique category
+length(unique(df_copy$discharge_disposition_id))
+
+
+# creating discharge - binary variable
+df <- df %>%
+  mutate(discharge = ifelse(discharge_disposition_id == "home", "Home", "Other"))
+
+# Check the first few rows to verify
+head(df)
+table(df$discharge)
+
+
+```
+
+## Update Gender
+
+-   Initially, the gender distribution in the dataset was examined using
+    the table() function, revealing counts for *Female, Male* and
+    *Unknown/Invalid*.
+
+-   Created a subset (df_subset) excluding observations with
+    Unknown/Invalid values in the gender variable to handle missing
+    values, resulting in counts for Male and Female categories.
+
+-   Replaced Unknown/Invalid values in the gender variable with NA
+    (missing) and generated random indices for missing gender values,
+    calculating the number of missing values.
+
+-   Generated random gender values (Male or Female) based on the number
+    of missing values and assigned these values to the missing indices
+    in the gender variable.
+
+-   Checked the distribution of the gender variable after imputation,
+    showing updated counts for Male and Female.
+
+-   Conducted a test of two proportions using prop.test() to assess if
+    the proportions of males differ significantly between the two
+    groups, and printed the results for insights into the statistical
+    significance of the observed differences.
+
+```{r}
+
+# original distribution of gender in df
+table(df$gender)
+
+# make subset without missing values
+df$gender_no_na<- df$gender
+df_subset <- df[df$gender %in% c("Male", "Female"), ]
+
+table(df_subset$gender)
+
+
+        # Female            Male      Unknown/Invalid 
+        #  54708           47055               3 
+
+# Replace "Unknown/Invalid" with NA
+df$gender[df$gender == "Unknown/Invalid"] <- NA
+
+# Generate random indices for missing gender values
+missing_indices <- which(is.na(df$gender))
+
+# Get the number of missing values
+num_missing <- length(missing_indices) # 3
+
+set.seed(123)
+# Generate random gender values (assuming binary: "Male" and "Female")
+random_gender <- sample(c("Male", "Female"), num_missing, replace = TRUE)
+
+# Assign random gender values to missing indices
+df$gender[missing_indices] <- random_gender
+
+# Check the distribution of the gender variable before and after imputation
+table(df$gender)
+df$gender <- droplevels(df$gender)
+table(df$gender)
+table(df$gender_no_na)
+
+
+# Define the counts for males and females in each group
+group1_male <- 46980 
+group1_female <- 54625
+group2_male <- 46977
+group2_female <- 54625
+
+# Conduct test of two proportions
+prop_test <- prop.test(c(group1_male, group2_male), c(group1_male + group1_female, group2_male + group2_female))
+
+# Print results
+print(prop_test)
+
+
+```
+
+The test of two proportions yielded a test statistic of 1.9666e-27 with
+1 degree of freedom, resulting in a p-value of 1. With such a high
+p-value, there is insufficient evidence to reject the null hypothesis of
+no difference in proportions of males between the two groups. Therefore,
+we fail to find statistically significant evidence that the proportions
+of males differ between the two groups. The sample estimates for the
+proportions of males in each group are approximately 0.4623690 for group
+1 and 0.4623629 for group 2.
+
+## Admission Source
+
+-   The distribution of admission source IDs (admission_source_id) in
+    the dataset (df) was examined using the table() function.
+
+-   All instances related to pediatric admission sources (IDs 13, 14,
+    and 11) were removed from the dataset using the filter() function to
+    exclude these specific values.
+
+-   Assigned labels to admission type IDs:
+
+    -   IDs 1 and 7 as Emergency_or_trauma,
+
+    -   ID 2 as Urgent, ID 3 as Elective,
+
+    -   ID 4 as Newborn, and
+
+    -   IDs 5, 6, and 8 as Missing for handling missing, NA, and Null
+        values.
+
+    -   All other values were labeled as *Other*.
+
+-   Checked the distribution of the updated admission type ID variable
+    using table() to ensure correct transformations were applied.
+
+-   Determined the number of unique admission type IDs in the original
+    dataset (df_copy) using length(unique()).
+
+-   The distribution of the updated admission source ID variable was
+    checked again using table() to ensure the replacements were applied
+    correctly.
+
+-   Finally, the number of unique admission source IDs in the original
+    dataset (df_copy) was determined to compare results.
+
+```{r}
+
+# counts of admission source ID
+table(df$admission_source_id)
+
+# remove all pediatric instances
+df <- df %>%
+  filter(admission_source_id != 13 & admission_source_id != 14 & 
+           admission_source_id != 11)
+
+
+# Replace values based on conditions
+df$admission_source_id <- ifelse(df$admission_source_id == c(7, 25), "ER",
+                           ifelse(df$admission_source_id %in% c(1, 2, 3), "refferal",
+                           ifelse(df$admission_source_id %in% c(4, 5, 10, 6, 22), "transfer",
+                           ifelse(df$admission_source_id %in% c(15, 17, 20, 8, 9), "Missing", "Other"))))
+
+table(df$admission_source_id)
+
+df$admission_source_id<- as.factor(df$admission_source_id)
+
+length(unique(df_copy$admission_source_id))
+
+
+
+```
+
+## Admission Type ID
+
+-   The distribution of admission type IDs (admission_type_id) in the
+    dataset was examined using the table() function.
+-   The admission type IDs were then transformed based on certain
+    conditions using the mutate() function in combination with
+    case_when():
+    -   IDs 1 and 7 were labeled as Emergency_or_trauma.
+    -   ID 2 was labeled as Urgent.
+    -   ID 3 was labeled as Elective.
+    -   ID 4 was labeled as Newborn.
+    -   IDs 5, 6, and 8 were combined and labeled as Missing to handle
+        missing, NA, and Null values.
+    -   Any other value was labeled as Other.
+-   The distribution of the updated admission type ID variable was
+    checked again using table() to ensure the transformations were
+    applied correctly.
+-   The number of unique admission type IDs in the original dataset
+    (df_copy) was determined using length(unique()).
+
+```{r}
+# counts of each category of admission type ID
+table(df$admission_type_id)
+
+# function to categorize admission type ID
+df <- df %>%
+  mutate(admission_type_id = case_when(
+    admission_type_id == 1 | admission_type_id == 7 ~ "Emergency_or_trauma",
+    admission_type_id == 2 ~ "Urgent",
+    admission_type_id == 3 ~ "Elective",
+    admission_type_id == 4 ~ "Newborn",
+    admission_type_id %in% c(5, 6, 8) ~ "Missing",  # Combine missing, NA, and Null into "Missing"
+    TRUE ~ "Other"  # Label any other value as "Other"
+  ))
+
+
+
+# Check the first few rows to verify
+table(df$admission_type_id)
+
+
+# number of unique instances in original data
+length(unique(df_copy$admission_type_id))
+
+```
+
+## Medication Type
+
+-   A new variable named *medication type* is created to condense
+    information about the medication types patients are on,
+    distinguishing between insulin, other oral medications, or both.
+-   Two lists are defined: one for oral medications (oral_medications)
+    and one for injectable medications (injectable_medication).
+-   The new variable df\$medication_type is initialized with none
+-   The presence of oral medications is checked using rowSums() on the
+    subset of columns corresponding to oral medications. If any oral
+    medication is found to be *steady, up* or *down*, the corresponding
+    entry in df\$medication_type is set to oral.
+-   Similarly, the presence of injectable medication (insulin) is
+    checked. If insulin is found to be steady, up or down and if
+    df\$medication_type is already labeled as *oral*, the medication
+    type is set as *both*; otherwise, it's set as *injectable*.
+-   After executing this code, the dataset df will have a new variable
+    medication_type indicating whether the patient is on oral
+    medication, injectable medication (insulin), or both.
+
+```{r}
+
+# Define lists of oral and injectable medications
+oral_medications <- c("metformin", "repaglinide", 
+                      "nateglinide", "chlorpropamide", 
+                      "glimepiride", "acetohexamide", 
+                      "glipizide", "glyburide", 
+                      "tolbutamide", "pioglitazone", 
+                      "rosiglitazone", "acarbose",  
+                      "miglitol", "troglitazone", 
+                      "tolazamide", "glyburide.metformin",  
+                      "glipizide.metformin", 
+                      "glimepiride.pioglitazone", 
+                      "metformin.rosiglitazone", 
+                      "metformin.pioglitazone")
+
+injectable_medication <- "insulin"
+
+# Create a new variable indicating medication type
+df$medication_type <- "None"  # Initialize with None
+
+# Check for oral medications
+df$medication_type <- 
+  ifelse(rowSums(df[oral_medications] == "Steady" |
+                  df[oral_medications] == "Down" |
+                  df[oral_medications] == "Up") > 0,"Oral",
+         df$medication_type)
+
+# Check for injectable medication
+df$medication_type <- ifelse(df$insulin == "Steady" | 
+                                  df$insulin == "Down" | 
+                                  df$insulin == "Up",
+                      ifelse(df$medication_type ==
+                               "Oral", "Both","Injectable"),
+        df$medication_type)
+
+```
+
+## ICD-9 label
+
+-   Two new variables are created: icd9_label and icd9_label2, from
+    diag_1 and diag_2, which aim to categorize ICD-9 diagnosis codes
+    into broader categories for easier interpretation.
+-   For icd9_label: - A diag_1_clean column is created using case_when()
+    statements to map specific diagnosis codes to broader categories
+    such as heart failure, pneumonia, hypertension etc.
+-   Diagnosis codes related to diabetes are grouped into categories like
+    *Uncontrolled*, *Controlled* and *Unspecified*.
+-   A function categorize_icd9() is created to apply similar
+    categorization logic to diag_2_clean, from diag_2, and the results
+    are stored in the icd9_label2 column.
+-   For both icd9_label and icd9_label2, the categorization is done
+    based on ranges of diagnosis codes corresponding to different
+    disease categories.
+-   The resulting columns icd9_label and icd9_label2 are converted into
+    factors to ensure appropriate data type representation.
+-   Finally, tables are generated to display the distribution of
+    diagnoses across the defined categories for both icd9_label and
+    icd9_label2.
+
+```{r}
+df <- mutate(df,
+             diag_1_clean = case_when(
+               
+               # top columns
+               diag_1 %in% c(428:428.99) ~ "heart failure", 
+               diag_1 %in% c(414) ~ "aortic aneurysm",
+               diag_1 %in% c(786) ~ "chest pain",
+               diag_1 %in% c(410) ~ "heart failure",
+               diag_1 %in% c(486) ~ "pneumonia",
+               diag_1 %in% c(426:427) ~ "Conduction disorders and cardiac dysrhythmias",
+               diag_1 %in% c(491) ~ "Chronic bronchitis",
+               diag_1 %in% c(715) ~ "Osteoarthrosis",
+               #diag_1 %in% c(682) ~ "cellulitis_ and_abscess",
+               diag_1 %in% c(434) ~ "occlusion_of_cerebral_arteries",
+               diag_1 %in% c(780) ~ "General_symptoms",
+               diag_1 %in% c(996) ~ "procedure_complications",
+              diag_1 %in% c(276) ~ "Disorders_of_fluid_electrolyte ",
+               diag_1 %in% c(38) ~ "Incision_of_Vessels",
+               diag_1 %in% c(599) ~ "urethra_and_urinary_tract",
+               diag_1 %in% c(584) ~ "in-hospital_acute_kidney_failure",
+               diag_1 %in% c(401:402.9) ~ "hypertension",
+               diag_1 %in% c(586) ~ "renal disease",
+            
+           
+               # for everything else
+              
+             
+          
+               diag_1 %in% c("250.62", "250.63", "250.32", "250.33",
+                                   "250.42", "250.43",  "250.52", "250.53",
+                                   "250.22","250.23",  "250.12", 
+                                   "250.13","250.02", "250.03", "250.92",
+                                   "250.93", "250.82", "250.83", "250.72",
+                                   "250.73") ~ "Uncontrolled Diabetes",
+               
+               diag_1 %in% c( "250.01", "250.91", "250.81", 
+                             "250.71",  "250.61", "250.51",  "250.41", "250.31", "250.21",  "250.11") ~ "Controlled Diabetes",
+              
+              
+              diag_1 %in% c("250.9", "250.8", "250.6", "250.4", "250.7", "250.5", "250.3", "250.2", "250.1") ~ "diabetes unspecified",
+               
+              substr(diag_1, 1, 1) == "V" ~ "vaccination",
+               TRUE ~ diag_1
+             ))
+
+diag1_table <- table(df$diag_1_clean)
+diag1_table <- sort(diag1_table, decreasing = TRUE)
+#table(df$diag_1_clean)
+```
+
+second run to make sure all categories are covered
+
+```{r}
+# Define a function to categorize ICD-9 codes
+
+# Assuming you have already created diag_1_clean column
+# Define a function to categorize ICD-9 codes
+categorize_icd9 <- function(diag_1_clean) {
+  case_when(
+    diag_1_clean %in% c(1:139) ~ "Infectious and Parasitic Diseases",
+    diag_1_clean %in% c(140:239) ~ "Neoplasms",
+    diag_1_clean %in% c(240:279) ~ "Endocrine, Nutritional, and Metabolic Diseases",
+    diag_1_clean %in% c(280:289) ~ "Diseases of the Blood and Blood-Forming Organs",
+    diag_1_clean %in% c(290:319) ~ "Mental Disorders",
+    diag_1_clean %in% c(320:389) ~ "Diseases of the Nervous System and Sense Organs",
+    # specified bc its top 2 most prominent 
+    diag_1_clean %in% c(410:414) ~ "Acute Myocardial Infarction",
+    
+    diag_1_clean %in% c(390:459) ~ "Diseases of the Circulatory System",
+    diag_1_clean %in% c(460:519) ~ "Diseases of the Respiratory System",
+    diag_1_clean %in% c(520:579) ~ "Diseases of the Digestive System",
+    diag_1_clean %in% c(580:629) ~ "Diseases of the Genitourinary System",
+    diag_1_clean %in% c(630:679) ~ "Complications of Pregnancy, Childbirth, and the Puerperium",
+    diag_1_clean %in% c(680:709) ~ "Diseases of the Skin and Subcutaneous Tissue",
+    diag_1_clean %in% c(710:739) ~ "Diseases of the Musculoskeletal System and Connective Tissue",
+    diag_1_clean %in% c(740:759) ~ "Congenital Anomalies",
+    diag_1_clean %in% c(760:779) ~ "Certain Conditions Originating in the Perinatal Period",
+    diag_1_clean %in% c(780:799) ~ "Ill-Defined Conditions",
+    diag_1_clean %in% c(800:999, "E909") ~ "Injury and Poisoning",
+    TRUE ~ as.character(diag_1_clean)  # Return original code for unmatched cases
+  )
+}
+
+# Apply the categorize_icd9 function to create a new column icd9_label
+df <- df %>%
+  mutate(
+    icd9_label = categorize_icd9(diag_1_clean)
+  )
+
+# Convert icd9_label to a factor
+df$icd9_label <- as.factor(df$icd9_label)
+
+
+# assess counts
+table(df$icd9_label)
+
+
+```
+
+ICD-9 label for secondary diagnosis
+
+```{r}
+df <- mutate(df,
+             diag_2_clean = case_when(
+               
+               # top columns
+               diag_2 %in% c(428) ~ "heart failure", # made these the same
+               diag_2 %in% c(414) ~ "heart failure",
+               diag_2 %in% c(786) ~ "respiratory_chest",
+               diag_2 %in% c(410) ~ "heart failure",
+               diag_2 %in% c(486) ~ "pneumonia",
+               diag_2 %in% c(427) ~ "Cardiac dysrhythmias",
+               diag_2 %in% c(491) ~ "Chronic bronchitis",
+               diag_2 %in% c(715) ~ "Osteoarthrosis",
+               diag_2 %in% c(682) ~ "cellulitis_ and_abscess",
+               diag_2 %in% c(434) ~ "occlusion_of_cerebral_arteries",
+               #diag_1 %in% c(780) ~ "General_symptoms",
+              # diag_1 %in% c(996) ~ "procedure_complications",
+               #diag_1 %in% c(276) ~ "Disorders_of_fluid_electrolyte ",
+               #diag_1 %in% c(38) ~ "Incision_of_Vessels",
+               #diag_1 %in% c(599) ~ "urethra_and_urinary_tract",
+               #diag_1 %in% c(584) ~ "in-hospital_acute_kidney_failure",
+               #diag_1 %in% c(518) ~ "diseases_of_lung",
+           
+               # for everything else
+              
+               diag_2 %in% c("250.62", "250.63", "250.32", "250.33",
+                                   "250.42", "250.43",  "250.52", "250.53",
+                                   "250.22","250.23",  "250.12", 
+                                   "250.13","250.02", "250.03", "250.92",
+                                   "250.93", "250.82", "250.83", "250.72",
+                                   "250.73") ~ "Uncontrolled Diabetes",
+               
+               diag_2 %in% c("250.9", "250.01", "250.91", "250.8", "250.81", 
+                                   "250.7", "250.71", "250.6", "250.61",
+                                   "250.5", "250.51", "250.4", "250.41",
+                                   "250.3", "250.31", "250.2", "250.21", 
+                                   "250.1", "250.11") ~ "Controlled Diabetes",
+               
+              substr(diag_2, 1, 1) == "V" ~ "vaccination",
+              substr(diag_2, 1, 1) == "E" ~ "Injury and Poisoning",
+               TRUE ~ diag_2
+             ))
+
+diag2_table <- table(df$diag_2_clean)
+diag2_table <- sort(diag2_table, decreasing = TRUE)
+#table(df$diag_1_clean)
+
+
+
+categorize_icd9 <- function(diag_2_clean) {
+  case_when(
+    diag_2_clean %in% c(1:139) ~ "Infectious and Parasitic Diseases",
+    diag_2_clean %in% c(140:239) ~ "Neoplasms",
+    diag_2_clean %in% c(240:279) ~ "Endocrine, Nutritional, and Metabolic Diseases",
+    diag_2_clean %in% c(280:289) ~ "Diseases of the Blood and Blood-Forming Organs",
+    diag_2_clean %in% c(290:319) ~ "Mental Disorders",
+    diag_2_clean %in% c(320:389) ~ "Diseases of the Nervous System and Sense Organs",
+    # specified bc its top 2 most prominent 
+    diag_2_clean %in% c(410:414) ~ "Acute Myocardial Infarction",
+    
+    diag_2_clean %in% c(390:459) ~ "Diseases of the Circulatory System",
+    diag_2_clean %in% c(460:519) ~ "Diseases of the Respiratory System",
+    diag_2_clean %in% c(520:579) ~ "Diseases of the Digestive System",
+    diag_2_clean %in% c(580:629) ~ "Diseases of the Genitourinary System",
+    diag_2_clean %in% c(630:679) ~ "Complications of Pregnancy, Childbirth, and the Puerperium",
+    diag_2_clean %in% c(680:709) ~ "Diseases of the Skin and Subcutaneous Tissue",
+    diag_2_clean %in% c(710:739) ~ "Diseases of the Musculoskeletal System and Connective Tissue",
+    diag_2_clean %in% c(740:759) ~ "Congenital Anomalies",
+    diag_2_clean %in% c(760:779) ~ "Certain Conditions Originating in the Perinatal Period",
+    diag_2_clean %in% c(780:799) ~ "Ill-Defined Conditions",
+    diag_2_clean %in% c(800:999, "E909") ~ "Injury and Poisoning",
+    TRUE ~ as.character(diag_2_clean)  # Return original code for unmatched cases
+  )
+}
+
+# Apply the categorize_icd9 function to create a new column icd9_label
+df <- df %>%
+  mutate(
+    icd9_label2 = categorize_icd9(diag_2_clean)
+  )
+
+# Convert icd9_label to a factor
+df$icd9_label2 <- as.factor(df$icd9_label2)
+
+
+# assess counts
+table(df$icd9_label2)
+
+
+```
+
+fixing data types before saving df
+
+```{r}
+
+# Set all numeric columns to class "numeric"
+numeric_cols <- sapply(df, is.numeric)
+df[numeric_cols] <- lapply(df[numeric_cols], as.numeric)
+
+# Set all character columns to class "factor"
+character_cols <- sapply(df, is.character)
+df[character_cols] <- lapply(df[character_cols], as.factor)
+
+# save dataset
+write.csv(df, "df")
+
+```
+
+# Model Prep
+
+## retain single encounter
+
+-   A copy of the original dataframe df is created and assigned to a new
+    dataframe *dfC.*
+
+-   The dataframe *dfC* is then arranged in ascending order based on two
+    columns: patient_nbr and encounter_id.
+
+-   Duplicate rows in the arranged dataframe are removed based on the
+    patient_nbr column while keeping only the first occurrence of each
+    unique patient_nbr. This is achieved using the distinct() function
+    from the dplyr package, specifying .keep_all = TRUE to retain all
+    columns in the dataframe. The result is stored back into dfC.
+
+```{r}
+
+# Create a copy of the original dataframe
+dfC <- df[,]
+
+# Arrange the dataframe by patient_nbr and encounter_id
+dfC <- dfC %>%
+  arrange(patient_nbr, encounter_id)
+
+# Remove duplicate rows based on patient_nbr, keeping only the first occurrence
+dfC <- dfC %>%
+  distinct(patient_nbr, .keep_all = TRUE)
+
+
+```
+
+## Remove discharge dispositions *death* and *hospice*
+
+-   A vector values_to_remove is defined, containing the values
+    *expired* and *hospice*. These values correspond to specific
+    categories in the discharge_disposition_id column that need to be
+    removed from the dataframe.
+
+-   Records in the dataframe dfC where the discharge_disposition_id
+    column matches any of the values specified in values_to_remove are
+    removed using Boolean indexing.
+
+-   The resulting dataframe, which now excludes the records with
+    "expired" and "hospice" discharge dispositions, is assigned back to
+    dfC.
+
+```{r}
+
+# Define the values to be removed
+values_to_remove <- c("expired", "hospice")
+
+# Remove records with specified values for discharge_disposition_id
+dfC <- dfC[!(dfC$discharge_disposition_id %in% values_to_remove), ]
+
+
+```
+
+## Remove newborn-related encounters
+
+Remove newborn-relate outcomes to prevent biasing data.
+
+-   A vector values_to_remove is defined, containing the value
+    *Newborn*, indicating encounters related to newborns.
+
+-   Records in the dataframe where the admission_type_id column matches
+    the value *Newborn* are removed using Boolean indexing.
+
+-   After removal, the table of admission_type_id is displayed to verify
+    that encounters related to newborns have been removed.
+
+-   The admission_type_id column is converted to a factor and any extra
+    levels are dropped to ensure consistency.
+
+-   Similarly, the vector values_to_remove is defined again, this time
+    containing the value *Pediatrics*, indicating pediatric specialty.
+
+-   Records in the dataframe where the specialty column matches the
+    value *Pediatrics* are removed using Boolean indexing.
+
+-   The table of *specialty* is displayed to verify that pediatric
+    specialty encounters have been removed.
+
+-   The *specialty* column is converted to a factor and any extra levels
+    are dropped to ensure consistency.
+
+```{r}
+
+# Define the value to be removed
+values_to_remove <- c("Newborn")
+
+# Remove records with specified values for discharge_disposition_id
+dfC <- dfC[!(dfC$admission_type_id %in% values_to_remove), ]
+
+table(dfC$admission_type_id)
+
+# remove extra category in admission type id
+dfC$admission_type_id<- as.factor(dfC$admission_type_id)
+dfC$admission_type_id <- droplevels(dfC$admission_type_id)
+
+# Define the value to be removed
+values_to_remove <- c("Pediatrics")
+
+# Remove records with specified values 
+dfC <- dfC[!(dfC$specialty %in% values_to_remove), ]
+
+# Check the table after removal
+table(dfC$specialty)
+
+# Remove Pediatrics as a category from the specialty column
+dfC$specialty<- as.factor(dfC$specialty)
+dfC$specialty <- droplevels(dfC$specialty)
+
+# Check the table after removal
+table(dfC$specialty)
+
+```
+
+# Data Transformations
+
+## Comorbidity scores
+
+Reformat data
+
+-   Melt the dataframe dfC to long format, using reshape.
+
+-   Keep encounter_id as the identifier.
+
+-   Reshape variables diag_1, diag_2, and diag_3.
+
+-   Store the melted data in df_long.
+
+Identify Missing Codes:
+
+-   Convert df_long\$code to numeric.
+
+-   Create a new variable missing_code to identify rows with missing
+    codes.
+
+-   Remove the missing_code variable.
+
+Comorbidity function:
+
+-   Use the filtered dataframe df_long with the comorbidity function.
+
+-   Set id as *patient_nbr* and code as *code*.
+
+-   Use the Charlson comorbidity map.
+
+-   Assign zero comorbidity scores if missing.
+
+Check Structure of Comorbidity Data:
+
+-   Inspect the structure of the resulting comorbidity dataframe
+    *charlson*.
+
+-   Verify if the number of unique patient numbers matches the number of
+    rows in *charlson*.
+
+```{r}
+# Melt the dataframe to long format, keeping encounter_id as identifier
+df_long <- reshape(dfC, direction = "long", varying = list(c("diag_1", "diag_2", "diag_3")), v.names = "code", idvar = "patient_nbr", times = c(1, 2, 3), timevar = "diagnosis_order")
+
+df_long$code<- as.numeric(df_long$code)
+
+# Identify rows with missing codes
+df_long$missing_code <- df_long$code == "?"
+table(df_long$missing_code)
+# remove var
+df_long$missing_code<-NULL
+
+# Print the first 15 rows of the transformed dataframe
+print(head(df_long, n = 15), row.names = FALSE)
+
+
+# Now use filtered data frame with comorbidity function
+
+charlson <- comorbidity(x = df_long, id = "patient_nbr", code = "code", map = "charlson_icd9_quan", assign0 = TRUE)
+
+
+# Print the structure of dfC
+str(charlson)
+#table(dfC$diag_1)
+
+length(unique(df_long$patient_nbr)) == nrow(charlson) # check for TRUE
+```
+
+Compute Charlson Scores:
+
+-   Calculate Charlson scores using the score function.
+
+-   Utilize weights based on comorbidity severity.
+
+-   Ensure the length of scores matches the number of rows in
+    *charlson*.
+
+-   Append the scores to the original dataframe
+
+Preview Structure and Summary:
+
+-   Examine the structure of the updated dataframe
+
+-   Provide a summary of Charlson scores in *dfC*
+
+Visualize Charlson Scores:
+
+-   Generate a histogram depicting the distribution of Charlson scores
+    in *dfC*.
+
+-   Plot a histogram of Charlson scores against readmission status,
+    showing the normalized distribution by readmission.
+
+```{r}
+
+# get scores
+scores <- score(charlson, weights = "quan", assign0 = FALSE)
+length(scores) == nrow(charlson) # TRUE
+table(scores)
+
+# bind scores
+dfC <- cbind(dfC, scores)
+
+# Print the structure of the updated dataframe
+str(dfC)
+summary(dfC$scores)
+
+# histogram of charlson scores
+ggplot(dfC, aes(x = scores)) +
+  geom_histogram(fill = custom_colors[2], color = "black", bins = 9) +
+  labs(title = "Histogram of Charlson Scores",
+       x = "Charlson Scores", y = "Frequency") +
+  custom_theme
+
+
+# histogram of charlson scores against readmitted
+ggplot(data = dfC, aes(x = scores, fill = factor(readmitted))) + 
+  geom_bar(position = "fill") + 
+  scale_x_discrete("Number of Charlson Scores") + 
+  scale_y_continuous("Frequency") + 
+  guides(fill = guide_legend(title = "Readmitted")) + 
+  scale_fill_manual(values = c("#CC79A7", "#0072B2")) + 
+  labs(title = "Normalized Distribution of Number of Charlson scores by Readmission")
+
+```
+
+Compute Elixhauser Scores:
+
+-   Apply the comorbidity function to df_long to calculate Elixhauser
+    scores.
+-   Set id as *patient_nbr* and code as *cod.*.
+-   Use the Elixhauser comorbidity map.
+
+Check Structure of Elixhauser Scores:
+
+-   Print the structure of the resulting dataframe elihxauser.
+
+-   Verify if the number of unique patient numbers matches the number of
+    rows in elihxauser.
+
+Calculate Elixhauser Scores:
+
+-   Compute Elixhauser scores using the score function.
+
+-   Utilize weights based on comorbidity severity.
+
+-   Ensure the length of scores matches the number of rows in
+    elihxauser.
+
+-   Append the scores to the original dataframe
+
+-   Provide a summary of Elixhauser scores in *dfC*.
+
+```{r}
+# use the filtered data frame with comorbidity function
+elihxauser <- comorbidity(x = df_long, id = "patient_nbr", code = "code", map = "elixhauser_icd9_quan", assign0 = FALSE)
+
+
+# Print the structure of dfC
+str(elihxauser)
+
+length(unique(df_long$patient_nbr)) == nrow(elihxauser) # check for TRUE
+
+# get scores
+Escores <- score(elihxauser, weights = "vw", assign0 = FALSE)
+length(Escores) == nrow(elihxauser) # check for TRUE
+table(Escores)
+
+# bind to dfC
+dfC <- cbind(dfC, Escores)
+dfC$Escores<- as.numeric(dfC$Escores)
+summary(dfC$Escores)
+```
+
+Visualize Elixhauser Scores:
+
+-   Generate a histogram depicting the distribution of Elixhauser scores
+    in *dfC*.
+
+-   Plot a histogram of Elixhauser scores against readmission status,
+    showing the normalized distribution by readmission.
+
+```{r}
+
+# histogram of Elixhauser scores
+ggplot(dfC, aes(x = Escores)) +
+  geom_histogram(fill = custom_colors[2], color = "black", bins = 37) +
+  labs(title = "Histogram of Elixhauser Scores",
+       x = "Elixhauser Scores", y = "Frequency") +
+  custom_theme
+
+# normalized histogram of Elixhauser scores
+ggplot(data = dfC, aes(x = Escores, fill = factor(readmitted))) + 
+  geom_bar(position = "fill") + 
+  scale_x_discrete("Number of Elixhauser Scores") + 
+  scale_y_continuous("Frequency") + 
+  guides(fill = guide_legend(title = "Readmitted")) + 
+  scale_fill_manual(values = c("#CC79A7", "#0072B2")) + 
+  labs(title = "Normalized Distribution of Number of Elixhauser scores by Readmission")
+
+```
+
+Examine Scores with subsets:
+
+-   Create a new dataframe new_df containing records where the
+    icd9_label is (insert diagnosis).
+
+-   Create barcharts to visualize the readmitted_2 variable in new_df
+    and *dfC*.
+
+-   Create contingency tables for readmitted_2 in both new_df and *dfC*.
+
+-   Calculate column proportions using prop.table.
+
+-   Display the column proportions for both new_df and *dfC*.
+
+```{r}
+
+# Create a new dataframe with records where scores are greater than 4
+
+dfC$icd9_label<- as.factor(dfC$icd9_label)
+new_df <- subset(dfC, icd9_label == "in-hospital_acute_kidney_failure")
+
+
+barchart(new_df$readmitted_2)
+barchart(dfC$readmitted_2)
+
+
+# Create contingency tables
+cont_table_new <- table(new_df$readmitted_2)
+cont_table_dfC <- table(dfC$readmitted_2)
+
+# Calculate column proportions using prop.table
+prop_table_new <- prop.table(cont_table_new)
+prop_table_dfC <- prop.table(cont_table_dfC)
+
+# Display column proportions
+print("Column Proportions for new_df:")
+print(prop_table_new)
+
+print("Column Proportions for dfC:")
+print(prop_table_dfC)
+
+#those with in-hospital_acute_kidney_failure were readmitted at <30 =  0.1273957 where entire data set is <30 = 0.08989503 
+
+```
+
+-   Elixhauser scores
+
+    -   Standardized
+
+    -   log-transformed
+
+    -   
+
+```{r}
+# Elix scores
+hist(dfC$Escores)
+
+# standardized Elix scores
+Emean_score <- mean(dfC$Escores)
+Esd_score <- sd(dfC$Escores)
+dfC$standardized_Escores <- (dfC$Escores - Emean_score) / Esd_score
+hist(dfC$standardized_Escores)
+
+# log Elix scores
+dfC$log_Escores <- log(dfC$Escores +20)
+hist(dfC$log_Escores)
+
+
+# square root transformation
+dfC$sqrt_Escores <- sqrt(dfC$Escores)
+hist(dfC$sqrt_Escores)
+
+```
+
+-   Charlson scores
+
+    -   standardized
+
+    -   log-transformed
+
+```{r}
+# Charlson scores
+hist(dfC$scores)
+
+# standardized Charlson scores
+mean_score <- mean(dfC$scores)
+sd_score <- sd(dfC$scores)
+dfC$standardized_scores <- (dfC$scores - mean_score) / sd_score
+hist(dfC$standardized_scores)
+
+# log Charlson scores
+dfC$log_scores <- log(dfC$scores +1)
+hist(dfC$log_scores)
+
+
+# square root transformation
+dfC$sqrt_scores <- sqrt(dfC$scores)
+hist(dfC$sqrt_scores)
+
+
+
+```
+
+## Time in hospital
+
+Time in Hospital - standardized - log-transformed - box-cox
+transformation - square root transformation
+
+```{r}
+# time in hospital
+hist(dfC$time_in_hospital)
+
+# log transformation
+dfC$log_time_hosp <- log(dfC$time_in_hospital + 1)
+hist(dfC$log_time_hosp)
+
+# square root transformation
+dfC$sqrt_time_hosp <- sqrt(dfC$time_in_hospital)
+hist(dfC$sqrt_time_hosp)
+
+
+
+```
+
+## Num lab procedures
+
+Number of Lab Procedures - log-transformed - box-cox transformation -
+square root transformation - standardization
+
+```{r}
+
+# log transformation
+dfC$log_num_lab <- log(dfC$num_lab_procedures + 1)
+hist(dfC$log_num_lab)
+
+# square root transformation
+dfC$sqrt_num_lab <- sqrt(dfC$num_lab_procedures)
+hist(dfC$sqrt_num_lab)
+
+# standardization
+mean_lab <- mean(dfC$num_lab_procedures)
+sd_lab <- sd(dfC$num_lab_procedures)
+dfC$standardized_num_lab <- (dfC$num_lab_procedures - mean_lab) / sd_lab
+hist(dfC$standardized_num_lab)
+
+
+
+# binary transformation, greater than 40
+dfC$num_lab_procedures_binary50 <- ifelse(dfC$num_lab_procedures > 50, 1, 0)
+
+# binary transformation, greater than 40
+dfC$num_lab_procedures_binary40 <- ifelse(dfC$num_lab_procedures > 40, 1, 0)
+
+# binary transformation, greater than 20
+dfC$num_lab_procedures_binary20 <- ifelse(dfC$num_lab_procedures > 20, 1, 0)
+
+# binary transformation, greater than 1
+dfC$num_lab_procedures_binary1 <- ifelse(dfC$num_lab_procedures > 1, 1, 0)
+
+
+
+# Box-Cox Transformation
+
+# Find lambda using Box-Cox transformation
+boxcox_transform <- function(x) {
+  # Try lambda values from -2 to 2
+  lambda_seq <- seq(-2, 2, by = 0.1)
+  n <- length(x)
+  log_likelihood <- numeric(length(lambda_seq))
+  
+  for (i in seq_along(lambda_seq)) {
+    lambda <- lambda_seq[i]
+    if (lambda == 0) {
+      log_likelihood[i] <- sum(log(x))
+    } else {
+      log_likelihood[i] <- sum((x^lambda - 1) / lambda - lambda * log(x))
+    }
+  }
+  
+  # Find optimal lambda that maximizes log-likelihood
+  optimal_lambda <- lambda_seq[which.max(log_likelihood)]
+  
+  return(optimal_lambda)
+}
+
+# Apply Box-Cox transformation
+lambda <- boxcox_transform(dfC$num_lab_procedures)
+
+# Perform Box-Cox transformation
+if (lambda == 0) {
+  dfC$boxcox_num_lab_procedures <- log(dfC$num_lab_procedures)
+} else {
+  dfC$boxcox_num_lab_procedures <- (dfC$num_lab_procedures^lambda - 1) / lambda
+}
+
+hist(dfC$boxcox_num_lab_procedures)
+
+
+# standardizing box cox transformed var
+mean_lab <- mean(dfC$boxcox_num_lab_procedures)
+sd_lab <- sd(dfC$boxcox_num_lab_procedures)
+dfC$standardized_bc_num_lab <- (dfC$boxcox_num_lab_procedures - mean_lab) / sd_lab
+hist(dfC$standardized_bc_num_lab)
+```
+
+## Number of Medications
+
+-   logarithmic transformation
+-   square root transformation
+-   standardization
+-   box cox transformation
+
+```{r}
+# log num_medications
+dfC$log_num_med <- log(dfC$num_medications + 1)
+hist(dfC$log_num_med)
+
+# square root transformation
+dfC$sqrt_num_med <- sqrt(dfC$num_medications)
+hist(dfC$sqrt_num_med)
+
+# standardization
+mean_lab <- mean(dfC$num_medications)
+sd_lab <- sd(dfC$num_medications)
+dfC$standardized_num_med <- (dfC$num_medications - mean_lab) / sd_lab
+hist(dfC$standardized_num_med)
+
+
+# using Box-cox function defined in previous chunk
+
+# Apply Box-Cox transformation
+lambda <- boxcox_transform(dfC$num_medications)
+
+# Perform Box-Cox transformation
+if (lambda == 0) {
+  dfC$boxcox_num_meds <- log(dfC$num_medications)
+} else {
+  dfC$boxcox_num_meds <- (dfC$num_medications^lambda - 1) / lambda
+}
+
+hist(dfC$boxcox_num_meds)
+
+```
+
+-   Number of Emergency, Outpatient and Inpatient Visits.
+
+```{r}
+
+
+# log emergency visits
+dfC$log_num_emer <- log(dfC$number_emergency +1)
+hist(dfC$log_num_emer)
+
+# log outpatient visits
+dfC$log_num_outp <- log(dfC$number_outpatient + 1)
+hist(dfC$log_num_outp)
+
+# log inpatient visits
+dfC$log_num_inpt <- log(dfC$number_inpatient + 1)
+hist(dfC$log_num_inpt)
+
+
+```
+
+\
+Square root transformations
+
+```{r}
+# Square root transformation
+dfC$sqrt_time_hosp <- sqrt(dfC$time_in_hospital)
+hist(dfC$sqrt_time_hosp)
+
+```
+
+Even after log transformation, outpatient, inpatient and emergency
+visits are extremely imbalanced and right tailed. There variables are
+combined into one to see if predictive performance would improve.
+
+## Preceding visits
+
+-   Created a new variable preceding_visits by summing the counts of
+    emergency, outpatient, and inpatient visits.
+
+-   Displayed the total counts of preceding visits.
+
+-   Examined the proportions of preceding visits against readmission,
+    indicating how many patients with different numbers of preceding
+    visits were readmitted.
+
+```{r}
+# Create the new variable by summing the three variables
+dfC$preceding_visits <- dfC$number_emergency + dfC$number_outpatient + dfC$number_inpatient
+
+# total preceding visits
+table(dfC$preceding_visits)
+
+# precedicing visits against readmitted
+readmission_table <- table(dfC$preceding_visits, dfC$readmitted)
+#print(readmission_table)
+
+# proportions of preceding visits
+proportions_table <- prop.table(readmission_table, margin = 1)
+print(proportions_table)
+```
+
+*Preceding visits binary:*
+
+-   Created a binary variable preceding_visits_binary to indicate if a
+    patient had at least one preceding visit in the last year. -
+
+-   Analyzed the relationship between the binary variable and
+    readmission, showing proportions of readmission for patients with
+    and without preceding visits.
+
+```{r}
+# Create a new binary variable
+dfC$preceding_visits_binary <- ifelse(dfC$preceding_visits > 1, 1, 0)
+
+# precedicing visits against readmitted
+readmission_table <- table(dfC$preceding_visits_binary, dfC$readmitted)
+readmission_table
+
+# Calculate proportions
+proportions_table <- prop.table(readmission_table, margin = 1)
+
+# Display the table of proportions
+print(proportions_table)
+# we cans see that there are more patients readmitted if they had at least one preceding visit in the last year
+
+```
+
+*Preceding visits weighted:*
+
+-   Constructed a new variable preceding_visits_weighted by assigning
+    weights to emergency, outpatient, and inpatient visits.
+
+-   Illustrated the total counts of weighted preceding visits.
+
+-   Explored the proportions of weighted preceding visits against
+    readmission, providing insights into readmission rates based on
+    different weighted visit counts.
+
+```{r}
+
+# Create the new variable with weighted visits
+dfC$preceding_visits_weighted <- dfC$number_emergency * 5 + dfC$number_inpatient * 3 + dfC$number_outpatient
+
+
+# total preceding visits
+table(dfC$preceding_visits_weighted)
+
+# precedicing visits against readmitted
+readmission_table <- table(dfC$preceding_visits_weighted, dfC$readmitted)
+#print(readmission_table)
+
+# proportions of preceding visits
+proportions_table <- prop.table(readmission_table, margin = 1)
+print(proportions_table)
+
+```
+
+## Sensitivity Testing
+
+-   Utilized the createDataPartition function to split the dataframe
+    into training and testing sets, maintaining an 80/20 split.
+
+-   Evaluated class proportions in the testing set and compared them
+    with the entire dataset to identify any differences.
+
+-   Created a balanced training set (train_set_balanced) by oversampling
+    the minority class (class 1) to address the issue of class
+    imbalance.
+
+-   Compared the class distribution in the balanced training set with
+    the original training set.
+
+-   Utilized logistic regression (LR) model to assess the impact of
+    various predictor variables, including comorbidity scores, log
+    transformations of scores, and other demographic and medical
+    features.
+
+-   Experimented with adding or removing variables from the LR model to
+    observe their influence on model performance.
+
+-   Employed the balanced training set (train_set_balanced) to mitigate
+    the bias towards the majority class (class 0) and obtain more
+    accurate performance metrics.
+
+-   Evaluated model performance using confusion matrix, ROC curve, and
+    area under the curve (AUC) metrics.
+
+```{r}
+
+set.seed(123)
+# partition the data on 80/20 split
+train_indices <- createDataPartition(dfC$readmitted, p = 0.8, list = FALSE)
+train_set <- dfC[train_indices, ]
+test_set <- dfC[-train_indices, ]
+
+# compare proportions to assess any differences
+prop.table(table(test_set$readmitted))
+prop.table(table(dfC$readmitted))
+
+
+#  train balanced set
+table(train_set$readmitted)
+readmitted_1_indices <- which(train_set$readmitted == 1)
+oversampled_indices <- sample(readmitted_1_indices, sum(train_set$readmitted == 0), replace = TRUE)
+all_indices <- c(which(train_set$readmitted == 0), oversampled_indices)
+train_set_balanced <- train_set[all_indices, ]
+table(train_set_balanced$readmitted)
+
+
+
+# build model
+set.seed(10)
+TC <- trainControl( method = "CV", number = 10)
+train_set_balanced$readmitted<-as.factor(train_set_balanced$readmitted)
+
+
+# add or remove variables to assess impact 
+model <- train(readmitted ~ 
+                 # log_Escores + 
+                 # scores + 
+                 # Escores +
+                 # logEscores +
+                 # preceding_visits_weighted +
+                 # preceding_visits +
+                 # preceding_visits_binary + 
+                 gender  + 
+                 age  + 
+                 race +
+                 specialty +
+                 discharge +
+                 admission_source_id +
+                 time_in_hospital   + 
+                 num_lab_procedures +
+                 num_medications +
+                 diabetesMed,
+        
+               data = train_set_balanced, 
+               method = "glm",
+               family = binomial,
+               trControl = TC)
+
+# model summary
+summary(model)
+
+# predictions
+testsetpreds.LR <- predict(model, test_set)
+table(test_set$readmitted, testsetpreds.LR)
+
+# Calculate confusion matrix
+test_set$readmitted<- as.factor(test_set$readmitted)
+cm1 <- confusionMatrix(testsetpreds.LR, reference = test_set$readmitted, positive = "1")
+print(cm1)
+
+# Calculate ROC curve
+roc_curve <- roc(test_set$readmitted, as.numeric(testsetpreds.LR))
+plot(roc_curve, main = "ROC Curve for LASSO Model", col = "blue", lwd = 2)
+auc_value <- auc(roc_curve)
+print(paste("AUC:", auc_value))
+
+
+
+```
+
+# Partitioning *readmission*
+
+subset of readmission with levels "\<30" and "NO"
+
+Filtering Records: -
+
+-   Filtered the dataframe to include only records with values "\<30" or
+    "NO" in the column readmitted_2.
+
+-   Revalued the readmitted_2 column to binary format, where "\<30" is
+    represented as 1 and "NO" as 0.
+
+-   Displayed the distribution of the binary readmitted_2 values and
+    their proportions.
+
+Comparison with Original Data:
+
+-   Presented the distribution and proportions of the binary
+    readmitted_2 values in the filtered dataframe dfC.
+
+-   Compared these distributions and proportions with the original
+    dataframe df.
+
+```{r}
+# Filter records with only "<30" or "NO" values
+
+table(dfC$readmit)
+dfC <- subset(dfC, readmit %in% c("<30", "NO"))
+
+# Revalue
+dfC$readmitted_2 <- ifelse(dfC$readmit == "<30", 1, 0)
+
+# distribution
+table(dfC$readmitted_2)
+prop.table(table(dfC$readmitted_2))
+
+```
+
+Data Partitioning:
+
+-   Partitioned dfC into training and testing sets (train_set2 and
+    test_set2, respectively) with an 80/20 split using the
+    createDataPartition function.
+-   Examined the proportion of classes in the testing set (test_set2)
+    and compared them with the entire dataset to ensure
+    representativeness.
+
+Balanced Training Set:
+
+-   Created a balanced training set (train_set_balanced2) by
+    oversampling the minority class (class 1) to address class
+    imbalance.
+
+-   Achieved balance by randomly selecting instances from the minority
+    class and adding them to the training set until both classes were
+    represented equally.
+
+-   Checked the class distribution in the balanced training set to
+    verify balance.
+
+```{r}
+
+set.seed(123)
+
+train_indices <- createDataPartition(dfC$readmitted_2, p = 0.8, list = FALSE)
+train_set2 <- dfC[train_indices, ]
+test_set2 <- dfC[-train_indices, ]
+
+# Proportion of classes in the test set
+prop.table(table(test_set2$readmitted_2))
+
+# Proportion of classes in the entire dataset
+prop.table(table(dfC$readmitted_2))
+
+# Balanced set
+table(train_set2$readmitted_2)
+readmitted_1_indices <- which(train_set2$readmitted_2 == 1)
+
+oversampled_indices <- sample(readmitted_1_indices, sum(train_set2$readmitted_2 == 0), replace = TRUE)
+
+all_indices <- c(which(train_set2$readmitted_2 == 0), oversampled_indices)
+train_set_balanced2 <- train_set2[all_indices, ]
+table(train_set_balanced2$readmitted_2)
+
+
+
+```
+
+comparing subsets of \<30 and NO vs \<30\|\>30 &NO
+
+```{r}
+set.seed(10)
+TC <- trainControl( method = "CV", number = 10)
+
+train_set_balanced2$readmitted_2<-as.factor(train_set_balanced2$readmitted_2)
+
+model <- train(readmitted_2 ~ 
+                 log_scores +
+                 gender  + 
+                 age  + 
+                 race +
+                 specialty +
+                 discharge +
+                 admission_source_id +
+                 log_time_hosp   + 
+                 
+                 log_num_lab +
+                # standardized_num_lab +
+                 log_num_med +
+                 diabetesMed,
+               data = train_set_balanced2, 
+               method = "glm",
+               family = binomial,
+               trControl = TC)
+
+# model summary
+summary(model)
+
+# predictions
+testsetpreds.LR <- predict(model, test_set2)
+table( testsetpreds.LR, test_set2$readmitted)
+
+
+# Calculate confusion matrix- using dummy te
+test_set2$readmitted_2<- as.factor(test_set2$readmitted)
+cm1 <- confusionMatrix(testsetpreds.LR, reference = test_set2$readmitted_2, positive = "1")
+print(cm1)
+
+```
+
+Results
+
+When excluding records with readmissions greater than 30, the model
+exhibited the following metrics:
+
+-   Accuracy: 0.591
+
+-   Specificity: 0.5930
+
+-   Sensitivity: 0.5782
+
+In contrast, when omitting records of readmission greater than 30, the
+model displayed these metrics:
+
+-   Accuracy: 0.6282
+
+-   Specificity: 0.63874undefined
+
+-   Sensitivity: 0.51965
+
+Excluding cases with readmissions greater than 30 resulted in a higher
+sensitivity, indicating improved model performance in identifying
+positive cases. Therefore, removing records with *readmitted = '\>30'*
+for further modeling and analysis ensures the reliability and relevance
+of the subsequent results.
+
+### save dfC
+
+```{r}
+
+write.csv(dfC, "dfC")
+```
