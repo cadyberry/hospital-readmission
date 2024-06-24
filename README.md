@@ -1,5 +1,5 @@
 
-# Predicting Early Hospital Readmission
+# Predicting Early Patient Readmission
 
 ## Overview
 
