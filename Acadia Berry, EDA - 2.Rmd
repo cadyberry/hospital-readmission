@@ -1,5 +1,5 @@
 ---
-title: "Capstone project data prep"
+title: "EDA"
 author: "Acadia Berry"
 date: "2024-02-15"
 output: html_document
@@ -12,6 +12,8 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE)
 
 ```
+
+NOTE: Run the "1 data prep" file first
 
 # Library packages
 
@@ -28,31 +30,19 @@ library(plyr)
 library(rpart)
 library(pROC)
 library(forcats)
-
-
 ```
-
-Run the "Data Prep" file first project file
 
 # Import data
 
 ```{r}
 
-# get data sets
-
-# df_2 is cleaned data
-df_2<- read.csv("df_2")
-df_2 <- df_2 %>%
-  mutate_if(is.character, as.factor)
-
-# train set is from df_2
-dfC<-read.csv("dfC")
+dfC <-read.csv("dfC")
 dfC <- dfC %>%
   mutate_if(is.character, as.factor)
 table(dfC$readmitted)
 ```
 
-# Test and Training sets
+# Test and training sets
 
 ```{r}
 
@@ -77,14 +67,24 @@ table(train_set_balanced$readmitted)
 
 ```
 
-# Theme
+# Set theme
 
 ```{r}
 
 # Define a custom color palette with professional colors
-custom_colors <- c("#0072B2", "#009E73", "#F55E00", "#CC79A7", "#F0E442", "#E69F00", "#F5B4E9", "#A5B4E9","#15BE37","#241571", "#FFC300", "#DAF7A6", "#AAF7A6", "#C9B4E9")
+#custom_colors <- c("#5236ab", "#009E73", "#F55E00", "#bfb5f9", "#e6e3f3", "#E69F00", "#F5B4E9", "#A5B4E9","#15BE37","#241571", "#FFC300", "#DAF7A6", "#9e83f5", "#e6e3f3")
 
 
+
+# Define custom colors including the specified shades of purple
+custom_colors <- c("#200a58", "#5236ab", "#6e3fed", "#9e83f5", "#bfb5f9", "#cbc3e6", "#e6e3f3","#ffcdd2", "#ff978a", "#e31937", "#ff7362", "#ff6a00", "#991f3d", "#650a21" )
+
+
+# Plot to visualize the custom color palette
+plot(1:length(custom_colors), type = "n", axes = FALSE, xlab = "", ylab = "", main = "Custom Color Palette", ylim = c(0, 1), xlim = c(0, length(custom_colors)))
+for (i in 1:length(custom_colors)) {
+  rect(i - 1, 0, i, 1, col = custom_colors[i], border = NA)
+}
 
 # Set a global theme for ggplot2 with a professional look
 custom_theme <- theme_minimal() +
@@ -104,6 +104,8 @@ custom_theme <- theme_minimal() +
 # Set the global theme
 theme_set(custom_theme)
 
+
+
 ```
 
 # Correlation plot
@@ -111,12 +113,12 @@ theme_set(custom_theme)
 ```{r}
  
 # Assuming dfC is your data frame
-numeric_columns <- c( "time_in_hospital", "num_lab_procedures", "num_medications", "num_procedures", "number_outpatient", "number_inpatient", "number_emergency", "readmitted_2")
+numeric_columns <- c( "time_in_hospital", "num_lab_procedures", "num_medications", "num_procedures", "number_outpatient", "number_inpatient", "number_emergency")
 
 
 
 pairs.panels(dfC[, numeric_columns], 
-             hist.col="#0072B2", 
+             hist.col="#6e3fed", 
              show.points=TRUE, 
              stars=TRUE, 
              gap=0.05,alpha = -0.5,
@@ -126,7 +128,7 @@ pairs.panels(dfC[, numeric_columns],
              factor=2,
              pch=".", 
              main="Correlation Plot", 
-             col="#F0E442", 
+             col="#bfb5f9", 
              font=2)
 
 
@@ -136,7 +138,7 @@ pairs.panels(dfC[, numeric_columns],
 ```{r}
 # Look at correlations between numeric features
 num <- sapply(dfC, FUN = is.numeric)  # identify numeric columns
-(corx <- cor(dfC[, num], use = "pairwise.complete.obs"))  # simple correlation matrix
+#(corx <- cor(dfC[, num], use = "pairwise.complete.obs"))  # simple correlation matrix
 ```
 
 # Exploring variable distributions
@@ -150,17 +152,19 @@ dfC$readmit<-as.factor(dfC$readmit)
 # original distribution of readmitted
 ggplot(df, aes(x = readmit, fill = readmit)) +
   geom_bar() +
-  labs(title = "Bar plot for readmit",
-       x = "Reamit", y = "Frequency") +
-  scale_fill_manual(values = custom_colors)
+  labs(title = "Readmission Status",
+       x = "Readmitted", y = "Frequency") +
+  scale_fill_manual(values = custom_colors)+
+  guides(fill = FALSE)
 
 # readmitted as binary from dfC
 dfC$readmit<-as.factor(dfC$readmit)
 ggplot(dfC, aes(x = readmit, fill = readmit)) +
   geom_bar() +
-  labs(title = "Bar plot for readmit",
-       x = "Reamit", y = "Frequency") +
-  scale_fill_manual(values = custom_colors)  # Set custom bar colors
+  labs(title = "Patient Readmission Status",
+       x = "Readmitted", y = "Frequency") +
+  scale_fill_manual(values = custom_colors) +
+  guides(fill = FALSE) # Set custom bar colors
 
 ```
 
@@ -172,7 +176,7 @@ ggplot(dfC, aes(x = readmit, fill = readmit)) +
 # barplot of age (categorical)
 ggplot(dfC, aes(x = age, fill = age)) +
   geom_bar() +
-  labs(title = "Bar Chart of age",
+  labs(title = "Age Profile of Patients",
        x = "age", y = "Frequency") +
   scale_fill_manual(values = custom_colors) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
@@ -180,7 +184,7 @@ ggplot(dfC, aes(x = age, fill = age)) +
 # age_2
 ggplot(dfC, aes(x = age_2)) +
   geom_histogram(fill = custom_colors[2], color = "black", binwidth = 10) +
-  labs(title = "Histogram of Age",
+  labs(title = "Age Profile of Patients",
        x = "Age", y = "Frequency") +
   custom_theme
 
@@ -192,13 +196,15 @@ summary(dfC$age_2)
 ## Race
 
 ```{r}
-# Create a bar plot for the race variable with custom colors
+# Create a   the race variable with custom colors
 ggplot(dfC, aes(x = race, fill = race)) +
   geom_bar() +
-  labs(title = "Bar plot for Race",
+  labs(title = "Race Profile of Patients",
        x = "Race", y = "Frequency") +
   scale_fill_manual(values = custom_colors) +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1)) # Set custom bar colors
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  guides(fill = FALSE)
+# Set custom bar colors
 
 
 ```
@@ -208,10 +214,11 @@ ggplot(dfC, aes(x = race, fill = race)) +
 ```{r}
 ggplot(dfC, aes(x = gender, fill = gender)) +
   geom_bar() +
-  labs(title = "Bar chart of Gender",
+  labs(title = "Gender Profile of Patients",
        x = "Gender", y = "Frequency") +
-  scale_fill_manual(values = custom_colors[c(5,3)]) +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1)) # Set custom bar colors
+  scale_fill_manual(values = custom_colors) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  guides(fill = FALSE) # Set custom bar colors
 ```
 
 ## Admission type ID
@@ -225,7 +232,8 @@ ggplot(dfC, aes(x = fct_infreq(admission_type_id), fill = admission_type_id)) +
   labs(title = "Bar Chart of Admission Type ID",
        x = "Admission Type ID", y = "Frequency") +
   scale_fill_manual(values = custom_colors) +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  guides(fill = FALSE)
 
 
 ```
@@ -240,10 +248,11 @@ emergency is 1.8
 
 ggplot(dfC, aes(x = fct_infreq(admission_source_id), fill = admission_source_id)) +
   geom_bar() +
-  labs(title = "Bar plot for Admission Source ID",
+  labs(title = "  Admission Source ID",
        x = "Admission Source ID", y = "Frequency") +
   scale_fill_manual(values = custom_colors) +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  guides(fill = FALSE)
 
 
 ```
@@ -251,14 +260,15 @@ ggplot(dfC, aes(x = fct_infreq(admission_source_id), fill = admission_source_id)
 ## Medical specialty
 
 ```{r}
-# Create a bar plot for the specialty variable
+# Create a   the specialty variable
 
 ggplot(dfC, aes(x = fct_infreq(specialty), fill = specialty)) +
   geom_bar() +
   labs(title = "Bar Chart of Medical Specialty",
        x = "Medical Specialty", y = "Frequency") +
   scale_fill_manual(values = custom_colors) +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  guides(fill = FALSE)
 
 ```
 
@@ -274,7 +284,8 @@ ggplot(dfC, aes(x = A1Cresult, fill = A1Cresult)) +
   geom_bar() +
   labs(title = "Bar chart of HbA1c result",
        x = "HbA1C result", y = "Frequency") +
-  scale_fill_manual(values = custom_colors)
+  scale_fill_manual(values = custom_colors)+
+  guides(fill = FALSE)
 
 summary(dfC$A1Cresult)
 
@@ -285,9 +296,10 @@ summary(dfC$A1Cresult)
 ```{r}
 ggplot(dfC, aes(x = change, fill = change)) +
   geom_bar() +
-  labs(title = "Bar plot for change",
+  labs(title = "Change in Medication",
        x = "change", y = "Frequency") +
-  scale_fill_manual(values = custom_colors[c(2,4)]) 
+  scale_fill_manual(values = custom_colors[c(2,4)]) +
+  guides(fill = FALSE)
 ```
 
 ## Diabetes medication
@@ -296,9 +308,10 @@ ggplot(dfC, aes(x = change, fill = change)) +
 
 ggplot(dfC, aes(x = diabetesMed, fill = diabetesMed)) +
   geom_bar() +
-  labs(title = "Bar plot for diabetesMed",
+  labs(title = "Diabetes Medication",
        x = "diabetesMed", y = "Frequency") +
-  scale_fill_manual(values = custom_colors[c(4,5)]) 
+  scale_fill_manual(values = custom_colors[c(4,5)]) +
+  guides(fill = FALSE)
 
 
 ```
@@ -316,14 +329,16 @@ ggplot(dfC, aes(x = discharge_disposition_id, fill = discharge_disposition_id)) 
   labs(title = "Bar Chart of Discharge Disposition ID",
        x = "Discharge Disposition ID", y = "Frequency") +
   scale_fill_manual(values = custom_colors) + 
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  guides(fill = FALSE)
 
 
 ggplot(dfC, aes(x = discharge, fill = discharge)) +
   geom_bar() +
   labs(title = "Bar Chart of Discharge Disposition",
        x = "Discharge", y = "Frequency") +
-  scale_fill_manual(values = custom_colors[c(2,7)]) 
+  scale_fill_manual(values = custom_colors[c(2,7)])+
+  guides(fill = FALSE) 
 
 
 
@@ -347,9 +362,10 @@ dfC <- dfC %>%
 
 ggplot(dfC, aes(x = medication_type, fill = medication_type)) +
   geom_bar() +
-  labs(title = "Bar Chart of medication_type",
-       x = "medication_type", y = "Frequency") +
-  scale_fill_manual(values = custom_colors) 
+  labs(title = "Patient medication type",
+       x = "Medication type", y = "Frequency") +
+  scale_fill_manual(values = custom_colors) +
+  guides(fill = FALSE)
 
 
 ```
@@ -389,7 +405,7 @@ dfC <- dfC %>%
 # Create a bar plot for the medication_type variable
 ggplot(dfC, aes(x = max_glu_serum)) +
   geom_bar(fill = custom_colors[1]) +
-  labs(title = "Bar plot for Max Glu Serum",
+  labs(title = "  Max Glu Serum",
        x = "Max Glu Serum", y = "Frequency") +
   custom_theme
 ```
@@ -445,7 +461,7 @@ summary(dfC$time_in_hospital)
 
 # log transformed 
 ggplot(dfC, aes(x = log_time_hosp)) +
-  geom_histogram(fill = custom_colors[3], color = "black", bins = 10, binwidth=0.25) +
+  geom_histogram(fill = custom_colors[5], color = "black", bins = 10, binwidth=0.25) +
   labs(title = "Histogram of Log ofTime in Hospital",
        x = "Log of Time in Hospital (days)", y = "Frequency") +
   custom_theme
@@ -513,7 +529,7 @@ stays between readmitted and non-readmitted patients.
 ```{r}
 
 ggplot(dfC, aes(x = num_lab_procedures)) +
-  geom_histogram(fill = custom_colors[1], color = "black", bins = 132) +
+  geom_histogram(fill = custom_colors[3], color = "black", bins = 132) +
   labs(title = "Histogram of Number of Lab Procedures",
        x = "Number of Lab Procedures", y = "Frequency") +
   custom_theme
@@ -525,14 +541,14 @@ print(wilcox_test_result)
 
 # standardized lab procedures
 ggplot(dfC, aes(x = standardized_num_lab)) +
-  geom_histogram(fill = custom_colors[1], color = "black", bins = 132, binwidth=0.25) +
+  geom_histogram(fill = custom_colors[3], color = "black", bins = 132, binwidth=0.25) +
   labs(title = "Histogram of Standardized of Number of Lab Procedures",
        x = "Lab Procedures (standardized)", y = "Frequency") +
   custom_theme
 
 # log of lab procedures
 ggplot(dfC, aes(x = log_num_lab)) +
-  geom_histogram(fill = custom_colors[1], color = "black", bins = 132, binwidth=0.25) +
+  geom_histogram(fill = custom_colors[3], color = "black", bins = 132, binwidth=0.25) +
   labs(title = "Histogram of Standardized of Number of Lab Procedures",
        x = "Lab Procedures (standardized)", y = "Frequency") +
   custom_theme
@@ -547,7 +563,7 @@ print(wilcox_test_result)
 
 # standardized and box-cox transformation
 ggplot(dfC, aes(x = standardized_bc_num_lab)) +
-  geom_histogram(fill = custom_colors[1], color = "black", bins = 132, binwidth=0.25) +
+  geom_histogram(fill = custom_colors[3], color = "black", bins = 132, binwidth=0.25) +
   labs(title = "Histogram of Standardized of Number of Lab Procedures",
        x = "Lab Procedures (standardized)", y = "Frequency") +
   custom_theme
@@ -606,7 +622,7 @@ print(wilcox_test_result)
 ```{r}
 
 
-ggplot(df_2, aes(x = number_inpatient)) +
+ggplot(dfC, aes(x = number_inpatient)) +
   geom_histogram(fill = custom_colors[3], color = "black", bins = 30) +
   labs(title = "Histogram of Inpatient Visits",
        x = "Number of inpatient", y = "Frequency") +
@@ -625,7 +641,7 @@ print(wilcox_test_result)
 
 ```{r}
 
-ggplot(df_2, aes(x = number_emergency)) +
+ggplot(dfC, aes(x = number_emergency)) +
   geom_histogram(fill = custom_colors[3], color = "black", bins = 30) +
   labs(title = "Histogram of Number of ER Visits",
        x = "Number of ER Visits", y = "Frequency") +
@@ -670,7 +686,7 @@ ggplot(dfC, aes(x = factor(readmitted), y = num_lab_procedures)) +
   custom_theme
 
 # Perform Wilcoxon rank-sum test
-wilcox_test_result <- wilcox.test(num_lab_procedures ~ readmitted, data = df_2)
+wilcox_test_result <- wilcox.test(num_lab_procedures ~ readmitted, data = dfC)
 
 # Print the result
 print(wilcox_test_result)
@@ -687,7 +703,7 @@ ggplot(dfC, aes(x = num_lab_procedures, fill = factor(readmitted))) +
   scale_x_continuous("Number of Lab Procedures") +
   scale_y_continuous("Percent") +
   guides(fill = guide_legend(title = "Readmission")) +
-  scale_fill_manual(values = c("#AAF7A6", "#C9B4E9"))+
+  scale_fill_manual(values = c("#9e83f5", "#e6e3f3"))+
   labs(title = "Histogram of Number of Lab Procedures by Readmission Status")
 
 
@@ -701,7 +717,7 @@ ggplot(dfC, aes(x = num_lab_procedures, fill = factor(readmitted))) +
   scale_x_continuous("Number of Lab Procedures") +
   scale_y_continuous("Percent") +
   guides(fill = guide_legend(title = "Readmission")) +
-  scale_fill_manual(values = c("#AAF7A6", "#C9B4E9")) +
+  scale_fill_manual(values = c("#9e83f5", "#e6e3f3")) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
   labs(title = "Histogram of Number of Lab Procedures by Readmission Status")
 
@@ -720,7 +736,7 @@ ggplot(dfC, aes(x = factor(readmitted), y = num_medications)) +
   custom_theme
 
 # Perform Wilcoxon rank-sum test
-wilcox_test_result <- wilcox.test(num_medications ~ readmitted, data = df_2)
+wilcox_test_result <- wilcox.test(num_medications ~ readmitted, data = dfC)
 
 # Print the result
 print(wilcox_test_result)
@@ -742,7 +758,7 @@ ggplot(dfC, aes(x = factor(readmitted), y = num_procedures)) +
   custom_theme
 
 # Perform Wilcoxon rank-sum test
-wilcox_test_result <- wilcox.test(num_procedures ~ readmitted, data = df_2)
+wilcox_test_result <- wilcox.test(num_procedures ~ readmitted, data = dfC)
 
 # Print the result
 print(wilcox_test_result)
@@ -785,30 +801,6 @@ indicates no association and 1 indicates a perfect association. In this
 case, the phi coefficient is approximately 0.085, indicating a weak
 positive association between *change* and *readmitted*.
 
-## Number of lab procedures & readmitted
-
-```{r}
-
-ggplot(dfC, aes(x = num_lab_procedures, fill = readmitted)) +
-  geom_density(alpha = 0.5) +
-  labs(title = "Density Plot of Number of Lab Procedures by Readmission Status",
-       x = "Number of Lab Procedures", y = "Density") +
-  scale_fill_manual(values = c("#CC79A7", "#0072B2")) +
-  custom_theme
-
-
-ggplot(dfC, aes(x = log_num_lab, fill = readmitted)) +
-  geom_density(alpha = 0.5) +
-  labs(title = "Density Plot of Number of Lab Procedures by Readmission Status",
-       x = "Number of Lab Procedures", y = "Density") +
-  scale_fill_manual(values = c("#CC79A7", "#0072B2")) +
-  custom_theme
-
-
-
-
-```
-
 ## HbA1c result & readmitted
 
 ```{r}
@@ -830,22 +822,14 @@ print(phi_coefficient)
 
 
 # Create a bar plot for readmitted and A1Cresult
-ggplot(dfC, aes(x = A1Cresult, fill = readmitted)) +
+ggplot(dfC, aes(x = A1Cresult, fill = readmitted_2)) +
   geom_bar(position = "dodge", color = "black") +
-  labs(title = "Bar plot for A1Cresult and Readmitted",
+  labs(title = "  A1Cresult and Readmitted",
        x = "A1Cresult", y = "Proportion",
        fill = "Readmitted") +
-  scale_fill_manual(values = custom_colors[2:3]) +  # Use custom colors for fill
+  scale_fill_manual(values = custom_colors[2:5]) +  # Use custom colors for fill
   custom_theme
 
-# Create a bar plot for readmitted and A1Cresult
-ggplot(dfC, aes(x = A1Cresult, fill = readmitted)) +
-  geom_bar(position = "fill", color = "black") +
-  labs(title = "Bar plot for A1Cresult and Readmitted",
-       x = "A1Cresult", y = "Proportion",
-       fill = "Readmitted") +
-  scale_fill_manual(values = custom_colors[2:3]) +  # Use custom colors for fill
-  custom_theme
 
 # contingency table of HbA1c levels
 proportions_table <- table(dfC$A1Cresult)
@@ -871,13 +855,6 @@ chisq_test_result <- chisq.test(counts_table)
 print(chisq_test_result)
 
 
-# a1c result against scores
-ggplot(dfC, aes(x = A1Cresult, y = scores)) +
-  geom_boxplot(fill = custom_colors[2], color = custom_colors[1]) +
-  labs(title = "Box plot of Scores by HbA1c Result",
-       x = "HbA1c Result", y = "Scores")
-
-
 # Perform ANOVA
 anova_result <- aov(scores ~ A1Cresult, data = dfC)
 summary(anova_result)
@@ -887,8 +864,6 @@ summary(anova_result)
 kruskal_test_result <- kruskal.test(scores ~ A1Cresult, data = dfC)
 print(kruskal_test_result)
 ```
-
-Sure, let's break down each statistical test and its respective results:
 
 The Kruskal-Wallis test assesses whether the medians of a continuous
 variable (scores) differ across different groups (A1Cresult categories).
@@ -927,7 +902,7 @@ ggplot() +
   scale_x_discrete("Days in Hospital ") +
   scale_y_continuous("Frequency") +
   guides (fill= guide_legend(title = "Readmitted")) + 
-  scale_fill_manual(values = c("#CC79A7", "#0072B2"))+
+  scale_fill_manual(values = c("#bfb5f9", "#5236ab"))+
   labs(
     title = "Norm. Distribution of Time in Hospital by Readmission",
      )
@@ -969,7 +944,7 @@ ggplot(data = dfC, aes(x = number_outpatient, fill = factor(readmitted))) +
   scale_x_discrete("Number of Outpatient Visits") + 
   scale_y_continuous("Frequency") + 
   guides(fill = guide_legend(title = "Readmitted")) + 
-  scale_fill_manual(values = c("#CC79A7", "#0072B2")) + 
+  scale_fill_manual(values = c("#bfb5f9", "#5236ab")) + 
   labs(title = "Normalized Distribution of Number of Outpatient Visits by Readmission")
 
 # Perform Wilcoxon rank-sum test
@@ -1000,7 +975,7 @@ ggplot(data = dfC, aes(x = number_inpatient, fill = factor(readmitted))) +
   scale_x_discrete("Number of Outpatient Visits") + 
   scale_y_continuous("Frequency") + 
   guides(fill = guide_legend(title = "Readmitted")) + 
-  scale_fill_manual(values = c("#CC79A7", "#0072B2")) + 
+  scale_fill_manual(values = c("#bfb5f9", "#5236ab")) + 
   labs(title = "Normalized Distribution of Number of Outpatient Visits by Readmission")
 
 # Perform Wilcoxon rank-sum test
@@ -1024,7 +999,7 @@ ggplot(data = dfC, aes(x = number_emergency, fill = factor(readmitted))) +
   scale_x_discrete("Number of ER Visits") + 
   scale_y_continuous("Frequency") + 
   guides(fill = guide_legend(title = "Readmitted")) + 
-  scale_fill_manual(values = c("#CC79A7", "#0072B2")) + 
+  scale_fill_manual(values = c("#bfb5f9", "#5236ab")) + 
   labs(title = "Normalized ER Visits by Readmission")
 
 # Perform Wilcoxon rank-sum test
@@ -1051,16 +1026,16 @@ between the readmitted and non-readmitted groups.
 ## Number of diagnoses & readmitted
 
 ```{r}
-ggplot(data = df_2, aes(x = number_diagnoses, fill = factor(readmitted))) + 
+ggplot(data = dfC, aes(x = number_diagnoses, fill = factor(readmitted))) + 
   geom_bar(position = "fill") + 
   scale_x_discrete("Number of diagnoses") + 
   scale_y_continuous("Frequency") + 
   guides(fill = guide_legend(title = "Readmitted")) + 
-  scale_fill_manual(values = c("#CC79A7", "#0072B2")) + 
+  scale_fill_manual(values = c("#bfb5f9", "#5236ab")) + 
   labs(title = "Normalized number of diagnoses by Readmission")
 
 # Perform Wilcoxon rank-sum test
-wilcox_test_result <- wilcox.test(number_diagnoses ~ readmitted, data = df_2)
+wilcox_test_result <- wilcox.test(number_diagnoses ~ readmitted, data = dfC)
 
 # Print the result
 print(wilcox_test_result)
@@ -1175,7 +1150,7 @@ dfC$readmitted_2<- as.factor(dfC$readmitted_2)
 # Create a bar plot for readmitted and A1Cresult
 ggplot(dfC, aes(x = diag_1, fill = readmitted_2)) +
   geom_bar(position = "fill", color = "black") +
-  labs(title = "Bar plot for diag_1 and Readmitted",
+  labs(title = "  diag_1 and Readmitted",
        x = "Diag_1", y = "Proportion",
        fill = "Readmitted") +
   scale_fill_manual(values = custom_colors[2:3]) +  # Use custom colors for fill
@@ -1326,9 +1301,9 @@ print(cramers_v)
 # Bar plot for medication_type against readmitted
 ggplot(dfC, aes(x = medication_type, fill = factor(readmitted))) +
   geom_bar(position = "fill") +
-  labs(title = "Bar plot for Medication Type against Readmission",
+  labs(title = "  Medication Type against Readmission",
        x = "Medication Type", y = "Proportion of Readmitted") +
-  scale_fill_manual(values = c("#0072B2", "#D55E00")) 
+  scale_fill_manual(values = c("#5236ab", "#cbc3e6")) 
 
 ```
 
@@ -1413,9 +1388,9 @@ print(chi_square_test)
 # Bar plot for medication_type against readmitted
 ggplot(dfC, aes(x = discharge, fill = factor(readmitted))) +
   geom_bar(position = "fill") +
-  labs(title = "Bar plot for Discharge against Readmission",
+  labs(title = "  Discharge against Readmission",
        x = "Discharge", y = "Proportion of Readmitted") +
-  scale_fill_manual(values = c("#0072B2", "#D55E00")) 
+  scale_fill_manual(values = c("#5236ab", "#cbc3e6")) 
 
 ```
 
@@ -1453,9 +1428,9 @@ print(cramers_v)
 # Bar plot for medication_type against readmitted
 ggplot(dfC, aes(x = admission_type_id, fill = factor(readmitted))) +
   geom_bar(position = "fill") +
-  labs(title = "Bar plot for Admission type id against Readmission",
+  labs(title = "Admission Type and Readmission",
        x = "Admission type id", y = "Proportion of Readmitted") +
-  scale_fill_manual(values = c("#0072B2", "#D55E00")) +
+  scale_fill_manual(values = c("#5236ab", "#cbc3e6")) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels
 
 
@@ -1499,9 +1474,9 @@ print(cramers_v)
 # Bar plot for medication_type against readmitted
 ggplot(dfC, aes(x = race, fill = factor(readmitted))) +
   geom_bar(position = "fill") +
-  labs(title = "Bar plot for Race against Readmission",
+  labs(title = "Race and Readmission",
        x = "Race", y = "Proportion of Readmitted") +
-  scale_fill_manual(values = c("#0072B2", "#D55E00")) +
+  scale_fill_manual(values = c("#5236ab", "#cbc3e6")) +
  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels
 
 
@@ -1538,9 +1513,9 @@ print(chi_square_test)
 # Bar plot for medication_type against readmitted
 ggplot(dfC, aes(x = gender, fill = factor(readmitted))) +
   geom_bar(position = "fill") +
-  labs(title = "Bar plot for Gender against Readmission",
+  labs(title = "Gender and Readmission",
        x = "Gender", y = "Proportion of Readmitted") +
-  scale_fill_manual(values = c("#0072B2", "#D55E00")) +
+  scale_fill_manual(values = c("#5236ab", "#cbc3e6")) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels
 
 
@@ -1589,7 +1564,7 @@ ggplot(dfC, aes(x = scores, fill = factor(readmitted_2))) +
   labs(title = "Histogram of Charlson Comorbidity Scores by Readmission",
        x = "Charlson Comorbidity Score", y = "Frequency",
        fill = "Readmitted") +
-  scale_fill_manual(values = c("#0072B2", "#F0E442")) +  # Custom colors for readmission status
+  scale_fill_manual(values = c("#5236ab", "#e6e3f3")) +  # Custom colors for readmission status
   theme_minimal()  # Apply a minimal theme for better readability
 
 
@@ -1599,7 +1574,7 @@ ggplot(dfC, aes(x = scores, fill = factor(readmitted_2))) +
   labs(title = "Normalized Histogram of Charlson Comorbidity Scores by Readmission",
        x = "Charlson Comorbidity Score", y = "Proportion",
        fill = "Readmitted") +
-  scale_fill_manual(values = c("#0072B2", "#F0E442")) +  # Custom colors for readmission status
+  scale_fill_manual(values = c("#5236ab", "#e6e3f3")) +  # Custom colors for readmission status
   theme_minimal()  # Apply a minimal theme for better readability
 
 
@@ -1665,9 +1640,9 @@ print(cramers_v)
 # barchart of a1c and readmitted
 ggplot(dfC, aes(x = A1Cresult, fill = factor(readmitted))) +
   geom_bar(position = "stack") +
-  labs(title = "Bar plot for A1Cresult against Readmission",
+  labs(title = "A1Cresult against Readmission",
        x = "A1Cresult", y = "Proportion of Readmitted") +
-  scale_fill_manual(values = c("#0072B2", "#D55E00")) 
+  scale_fill_manual(values = c("#5236ab", "#cbc3e6")) 
 
 
 
@@ -1675,9 +1650,9 @@ ggplot(dfC, aes(x = A1Cresult, fill = factor(readmitted))) +
 # normalized barchart of a2c and readmitted
 ggplot(dfC, aes(x = A1Cresult, fill = factor(readmitted))) +
   geom_bar(position = "fill") +
-  labs(title = "Bar plot for A1Cresult against Readmission",
+  labs(title = "  A1Cresult against Readmission",
        x = "A1Cresult", y = "Proportion of Readmitted") +
-  scale_fill_manual(values = c("#0072B2", "#D55E00")) 
+  scale_fill_manual(values = c("#5236ab", "#cbc3e6")) 
 ```
 
 The Pearson's chi-squared test was conducted to assess the independence
@@ -1912,7 +1887,7 @@ association between the groups and the distribution of HbA1c levels
 based on this analysis. The group "None" was removed to see if results
 are different.
 
-### unspecified vs uncontrolled diabetes
+### Unspecified vs uncontrolled diabetes
 
 ```{r}
 
@@ -1945,7 +1920,7 @@ significantly different. Therefore, we can conclude that there is a
 significant association between the groups and the distribution of HbA1c
 levels among pateitnes with unspecified and uncontrolled diabetes.
 
-### unspecified vs controlled diabetes
+### Unspecified vs controlled diabetes
 
 ```{r}
 
@@ -1977,14 +1952,6 @@ indicating that the proportions of HbA1c levels across the groups are
 not significantly different. Therefore, we cannot conclude that there is
 a significant association between the groups and the distribution of
 HbA1c levels among patients with unspecified and controlled diabetes.\
-
-### 
-
-```{r}
-
-
-
-```
 
 ## diabetes as primary diagnosis
 
