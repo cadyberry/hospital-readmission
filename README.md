@@ -10,9 +10,9 @@ This study analyzes over 101,000 hospital records from the Cerner Health Facts D
 To run this project, follow these steps:
 
 1. **Download the Dataset:**
-   - Download the dataset `diabetic_data.csv` from [https://github.com/cadyberry/hospital-readmission/blob/main/diabetic_data.csv](here).
+   - To download the dataset `diabetic_data.csv`, click [here](https://github.com/cadyberry/hospital-readmission/blob/main/diabetic_data.csv).
 
-2. **Run Files in Order:**
+3. **Run Files in Order:**
    - Run the following files in sequence:
      1. `1- Data prep.rmd`: Data cleaning and preparation.
      2. `2- EDA.rmd`: Exploratory data analysis.
@@ -22,7 +22,7 @@ To run this project, follow these steps:
 
 ### Step 1: Download Dataset
 
-Download the dataset `diabetic_data.csv`  from [https://github.com/cadyberry/hospital-readmission/blob/main/diabetic_data.csv](here).
+Download the dataset `diabetic_data.csv`[here](https://github.com/cadyberry/hospital-readmission/blob/main/diabetic_data.csv).
 
 ### Step 2: Run Files
 
